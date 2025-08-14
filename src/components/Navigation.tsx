@@ -40,6 +40,17 @@ const Navigation = () => {
                 Upload
               </Link>
             </Button>
+            
+            <Button
+              variant={location.pathname === "/auth" ? "hero" : "outline"}
+              size="sm"
+              asChild
+            >
+              <Link to="/auth" className="flex items-center gap-2">
+                <Play className="w-4 h-4" />
+                Sign In
+              </Link>
+            </Button>
           </div>
         </div>
       </div>

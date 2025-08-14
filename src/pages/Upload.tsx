@@ -5,7 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
+import { useToast } from "@/hooks/use-toast";
 import Navigation from "@/components/Navigation";
+import { supabase } from "@/integrations/supabase/client";
 import { 
   Upload as UploadIcon, 
   FileVideo, 
@@ -14,7 +16,6 @@ import {
   AlertCircle,
   Clock
 } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
 
 const Upload = () => {
   const { toast } = useToast();
@@ -89,37 +90,101 @@ const Upload = () => {
       return;
     }
 
-    setUploading(true);
-    setUploadProgress(0);
-
-    // Simulate upload progress
-    const interval = setInterval(() => {
-      setUploadProgress(prev => {
-        if (prev >= 95) {
-          clearInterval(interval);
-          return 95;
-        }
-        return prev + Math.random() * 10;
-      });
-    }, 500);
-
-    // Since Supabase integration is needed for backend functionality
-    setTimeout(() => {
-      clearInterval(interval);
-      setUploadProgress(100);
-      
+    if (!title.trim()) {
       toast({
-        title: "Upload Complete",
-        description: "Your videos have been uploaded and are being processed",
+        title: "Title Required",
+        description: "Please enter a title for your video",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setUploading(true);
+      setUploadProgress(0);
+
+      // Check if user is authenticated
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast({
+          title: "Authentication Required",
+          description: "Please sign in to upload videos.",
+          variant: "destructive",
+        });
+        setUploading(false);
+        return;
+      }
+
+      // Upload each file
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const progressBase = (i / files.length) * 100;
+        const progressStep = 100 / files.length;
+        
+        // Generate unique filename
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+        
+        // Upload file to Supabase Storage
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('videos')
+          .upload(fileName, file);
+        
+        // Simulate progress for now
+        setUploadProgress(progressBase + progressStep * 0.7);
+
+        if (uploadError) throw uploadError;
+
+        setUploadProgress(progressBase + progressStep * 0.7);
+
+        // Get the file URL
+        const { data: { publicUrl } } = supabase.storage
+          .from('videos')
+          .getPublicUrl(fileName);
+
+        // Create video record in database
+        const { data: videoData, error: dbError } = await supabase
+          .from('videos')
+          .insert({
+            user_id: user.id,
+            title: i === 0 ? title : `${title} (${i + 1})`,
+            description,
+            original_filename: file.name,
+            file_url: publicUrl,
+            file_size: file.size,
+            original_size: file.size,
+            compression_ratio: 75, // Simulated compression
+            status: 'processed'
+          })
+          .select()
+          .single();
+
+        if (dbError) throw dbError;
+
+        setUploadProgress(progressBase + progressStep);
+      }
+
+      toast({
+        title: "Success!",
+        description: `${files.length} video(s) uploaded successfully!`,
       });
       
       // Reset form
       setFiles([]);
       setTitle("");
       setDescription("");
+      
+    } catch (error) {
+      console.error('Upload error:', error);
+      toast({
+        title: "Upload Failed",
+        description: error instanceof Error ? error.message : "Failed to upload video",
+        variant: "destructive",
+      });
+    } finally {
       setUploading(false);
       setUploadProgress(0);
-    }, 5000);
+    }
   };
 
   return (

@@ -1,11 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/hooks/use-toast";
 import Navigation from "@/components/Navigation";
 import VideoPlayer from "@/components/VideoPlayer";
+import { supabase } from "@/integrations/supabase/client";
 import { 
   Play, 
   Search, 
@@ -22,52 +24,93 @@ import {
 
 const Dashboard = () => {
   const [searchQuery, setSearchQuery] = useState("");
+  const [videos, setVideos] = useState<any[]>([]);
+  const [stats, setStats] = useState({
+    totalVideos: 0,
+    totalViews: 0,
+    totalStorage: "0 MB",
+    savedStorage: "0 MB"
+  });
+  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
 
-  // Mock data - in real app this would come from Supabase
-  const videos = [
-    {
-      id: 1,
-      title: "Product Demo Video",
-      thumbnail: "https://picsum.photos/400/225?random=1",
-      duration: "3:45",
-      views: 1250,
-      uploadDate: "2024-01-15",
-      status: "processed",
-      size: "45.2 MB",
-      originalSize: "156.8 MB",
-      compressionRatio: "71%"
-    },
-    {
-      id: 2,
-      title: "Team Meeting Recording",
-      thumbnail: "https://picsum.photos/400/225?random=2",
-      duration: "25:30",
-      views: 89,
-      uploadDate: "2024-01-14",
-      status: "processing",
-      size: "89.1 MB",
-      originalSize: "312.4 MB",
-      compressionRatio: "72%"
-    },
-    {
-      id: 3,
-      title: "Customer Testimonial",
-      thumbnail: "https://picsum.photos/400/225?random=3",
-      duration: "2:15",
-      views: 2100,
-      uploadDate: "2024-01-12",
-      status: "processed",
-      size: "28.7 MB",
-      originalSize: "98.3 MB",
-      compressionRatio: "71%"
+  useEffect(() => {
+    fetchVideos();
+  }, []);
+
+  const fetchVideos = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast({
+          title: "Authentication Required",
+          description: "Please sign in to view your videos.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const { data: videosData, error } = await supabase
+        .from('videos')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      setVideos(videosData || []);
+      
+      // Calculate stats
+      const totalViews = videosData?.reduce((sum, video) => sum + (video.views || 0), 0) || 0;
+      const totalSize = videosData?.reduce((sum, video) => sum + (video.file_size || 0), 0) || 0;
+      const originalTotalSize = videosData?.reduce((sum, video) => sum + (video.original_size || 0), 0) || 0;
+      
+      setStats({
+        totalVideos: videosData?.length || 0,
+        totalViews,
+        totalStorage: formatFileSize(totalSize),
+        savedStorage: formatFileSize(originalTotalSize - totalSize)
+      });
+      
+    } catch (error) {
+      console.error('Error fetching videos:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch videos",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
-  const stats = {
-    totalVideos: 24,
-    totalViews: 15420,
-    totalStorage: "2.1 GB",
-    savedStorage: "5.8 GB"
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 MB';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const getShareableLink = (videoId: string) => {
+    const baseUrl = window.location.origin;
+    return `${baseUrl}/watch/${videoId}`;
+  };
+
+  const handleShare = async (video: any) => {
+    const shareableLink = getShareableLink(video.id);
+    try {
+      await navigator.clipboard.writeText(shareableLink);
+      toast({
+        title: "Link Copied!",
+        description: "Shareable link copied to clipboard",
+      });
+    } catch (error) {
+      toast({
+        title: "Share Link",
+        description: shareableLink,
+      });
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -184,7 +227,7 @@ const Dashboard = () => {
                     <CardContent className="p-0">
                       <div className="relative aspect-video bg-video-surface rounded-t-lg overflow-hidden">
                         <img
-                          src={video.thumbnail}
+                          src={video.thumbnail_url || "https://picsum.photos/400/225?random=" + video.id}
                           alt={video.title}
                           className="w-full h-full object-cover"
                         />
@@ -194,7 +237,7 @@ const Dashboard = () => {
                           </Button>
                         </div>
                         <div className="absolute bottom-2 right-2 bg-black/70 px-2 py-1 rounded text-xs font-medium">
-                          {video.duration}
+                          {video.duration || "0:00"}
                         </div>
                       </div>
                       
@@ -209,31 +252,41 @@ const Dashboard = () => {
                         <div className="flex items-center gap-2 mb-3">
                           {getStatusBadge(video.status)}
                           <span className="text-xs text-muted-foreground">
-                            Compressed {video.compressionRatio}
+                            Compressed {video.compression_ratio}%
                           </span>
                         </div>
                         
                         <div className="flex items-center justify-between text-sm text-muted-foreground mb-3">
                           <div className="flex items-center gap-1">
                             <Eye className="w-4 h-4" />
-                            {video.views.toLocaleString()}
+                            {(video.views || 0).toLocaleString()}
                           </div>
                           <div className="flex items-center gap-1">
                             <Calendar className="w-4 h-4" />
-                            {new Date(video.uploadDate).toLocaleDateString()}
+                            {new Date(video.created_at).toLocaleDateString()}
                           </div>
                         </div>
                         
                         <div className="text-xs text-muted-foreground mb-3">
-                          {video.size} (was {video.originalSize})
+                          {formatFileSize(video.file_size)} (was {formatFileSize(video.original_size)})
                         </div>
                         
                         <div className="flex gap-2">
-                          <Button variant="ghost" size="sm" className="flex-1">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="flex-1"
+                            onClick={() => handleShare(video)}
+                          >
                             <Share2 className="w-4 h-4 mr-1" />
                             Share
                           </Button>
-                          <Button variant="ghost" size="sm" className="flex-1">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="flex-1"
+                            onClick={() => window.open(video.file_url)}
+                          >
                             <Download className="w-4 h-4 mr-1" />
                             Download
                           </Button>
@@ -244,7 +297,21 @@ const Dashboard = () => {
                 ))}
               </div>
 
-              {filteredVideos.length === 0 && (
+              {loading ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {[1, 2, 3].map((i) => (
+                    <Card key={i} className="bg-video-surface border-video-border">
+                      <CardContent className="p-0">
+                        <div className="aspect-video bg-video-surface rounded-t-lg animate-pulse" />
+                        <div className="p-4">
+                          <div className="h-4 bg-video-surface rounded mb-2 animate-pulse" />
+                          <div className="h-3 bg-video-surface rounded w-3/4 animate-pulse" />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : filteredVideos.length === 0 ? (
                 <Card className="bg-video-surface border-video-border">
                   <CardContent className="p-12 text-center">
                     <FileVideo className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
@@ -254,7 +321,7 @@ const Dashboard = () => {
                     </p>
                   </CardContent>
                 </Card>
-              )}
+              ) : null}
             </TabsContent>
 
             <TabsContent value="analytics" className="space-y-6">
