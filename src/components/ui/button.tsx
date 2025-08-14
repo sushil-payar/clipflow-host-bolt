@@ -18,11 +18,15 @@ const buttonVariants = cva(
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
+        hero: "bg-gradient-primary text-primary-foreground shadow-primary hover:shadow-glow transition-all duration-300 border border-video-border",
+        glass: "bg-video-surface/50 backdrop-blur-sm border border-video-border text-foreground hover:bg-video-surface-hover/60 transition-all duration-300",
+        upload: "bg-video-surface border-2 border-dashed border-video-border hover:border-video-primary hover:bg-video-surface-hover transition-all duration-300"
       },
       size: {
         default: "h-10 px-4 py-2",
         sm: "h-9 rounded-md px-3",
         lg: "h-11 rounded-md px-8",
+        xl: "h-12 rounded-lg px-10 text-base",
         icon: "h-10 w-10",
       },
     },
