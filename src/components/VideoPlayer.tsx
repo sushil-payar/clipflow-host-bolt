@@ -30,13 +30,6 @@ const VideoPlayer = ({ src, poster, className }: VideoPlayerProps) => {
         ],
         poster,
         playbackRates: [0.5, 1, 1.25, 1.5, 2],
-        plugins: {
-          hotkeys: {
-            volumeStep: 0.1,
-            seekStep: 5,
-            enableModifiersForNumbers: false,
-          },
-        },
       }));
 
       // Custom styling for dark theme
