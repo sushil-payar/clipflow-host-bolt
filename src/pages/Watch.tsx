@@ -35,9 +35,12 @@ const Watch = () => {
         .from('videos')
         .select('*')
         .eq('id', id)
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
+      if (!videoData) {
+        throw new Error('Video not found');
+      }
 
       setVideo(videoData);
 
