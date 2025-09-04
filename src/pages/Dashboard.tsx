@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -32,24 +33,58 @@ const Dashboard = () => {
     savedStorage: "0 MB"
   });
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<any>(null);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    fetchVideos();
+    checkAuthAndFetchVideos();
   }, []);
 
-  const fetchVideos = async () => {
+  const checkAuthAndFetchVideos = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        toast({
-          title: "Authentication Required",
-          description: "Please sign in to view your videos.",
-          variant: "destructive",
-        });
+        navigate('/auth');
         return;
       }
+      setUser(user);
+      
+      // Fetch videos directly here instead of relying on state
+      const { data: videosData, error } = await supabase
+        .from('videos')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
 
+      if (error) throw error;
+
+      setVideos(videosData || []);
+      
+      // Calculate stats
+      const totalViews = videosData?.reduce((sum, video) => sum + (video.views || 0), 0) || 0;
+      const totalSize = videosData?.reduce((sum, video) => sum + (video.file_size || 0), 0) || 0;
+      const originalTotalSize = videosData?.reduce((sum, video) => sum + (video.original_size || 0), 0) || 0;
+      
+      setStats({
+        totalVideos: videosData?.length || 0,
+        totalViews,
+        totalStorage: formatFileSize(totalSize),
+        savedStorage: formatFileSize(originalTotalSize - totalSize)
+      });
+      
+    } catch (error) {
+      console.error('Error:', error);
+      navigate('/auth');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchVideos = async () => {
+    if (!user) return;
+    
+    try {
       const { data: videosData, error } = await supabase
         .from('videos')
         .select('*')
@@ -231,11 +266,16 @@ const Dashboard = () => {
                           alt={video.title}
                           className="w-full h-full object-cover"
                         />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-                          <Button variant="ghost" size="lg" className="bg-black/20 backdrop-blur-sm hover:bg-black/40">
-                            <Play className="w-8 h-8" />
-                          </Button>
-                        </div>
+                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+                           <Button 
+                             variant="ghost" 
+                             size="lg" 
+                             className="bg-black/20 backdrop-blur-sm hover:bg-black/40"
+                             onClick={() => navigate(`/watch/${video.id}`)}
+                           >
+                             <Play className="w-8 h-8" />
+                           </Button>
+                         </div>
                         <div className="absolute bottom-2 right-2 bg-black/70 px-2 py-1 rounded text-xs font-medium">
                           {video.duration || "0:00"}
                         </div>
