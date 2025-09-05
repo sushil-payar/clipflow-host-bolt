@@ -105,7 +105,9 @@ const Upload = () => {
 
       // Check if user is authenticated
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!user || !session) {
         toast({
           title: "Authentication Required",
           description: "Please sign in to upload videos.",
@@ -121,52 +123,38 @@ const Upload = () => {
         const progressBase = (i / files.length) * 100;
         const progressStep = 100 / files.length;
         
-        // Generate unique filename
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+        setUploadProgress(progressBase + progressStep * 0.2);
+
+        // Convert file to base64
+        const fileBuffer = await file.arrayBuffer();
+        const base64File = btoa(String.fromCharCode(...new Uint8Array(fileBuffer)));
         
-        // Upload file to Supabase Storage
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('videos')
-          .upload(fileName, file);
-        
-        // Simulate progress for now
-        setUploadProgress(progressBase + progressStep * 0.7);
+        setUploadProgress(progressBase + progressStep * 0.5);
 
-        if (uploadError) throw uploadError;
-
-        setUploadProgress(progressBase + progressStep * 0.7);
-
-        // Get the file URL
-        const { data: { publicUrl } } = supabase.storage
-          .from('videos')
-          .getPublicUrl(fileName);
-
-        // Create video record in database
-        const { data: videoData, error: dbError } = await supabase
-          .from('videos')
-          .insert({
-            user_id: user.id,
+        // Upload to Wasabi via edge function
+        const { data, error } = await supabase.functions.invoke('upload-to-wasabi', {
+          body: {
+            file: base64File,
+            fileName: file.name,
+            contentType: file.type,
             title: i === 0 ? title : `${title} (${i + 1})`,
             description,
-            original_filename: file.name,
-            file_url: publicUrl,
-            file_size: file.size,
-            original_size: file.size,
-            compression_ratio: 75, // Simulated compression
-            status: 'processed'
-          })
-          .select()
-          .single();
+            originalSize: file.size
+          },
+          headers: {
+            Authorization: `Bearer ${session.access_token}`
+          }
+        });
 
-        if (dbError) throw dbError;
+        if (error) throw error;
+        if (data.error) throw new Error(data.error);
 
         setUploadProgress(progressBase + progressStep);
       }
 
       toast({
         title: "Success!",
-        description: `${files.length} video(s) uploaded successfully!`,
+        description: `${files.length} video(s) uploaded to Wasabi successfully!`,
       });
       
       // Reset form

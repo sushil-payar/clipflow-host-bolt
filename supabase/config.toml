@@ -1,1 +1,4 @@
 project_id = "bdfkxzkiwzmwkdghvmoi"
+
+[functions.upload-to-wasabi]
+verify_jwt = false
