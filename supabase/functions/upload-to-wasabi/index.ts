@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.55.0'
+import { S3Client, PutObjectCommand } from "https://esm.sh/@aws-sdk/client-s3@3.470.0"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,6 +23,8 @@ serve(async (req) => {
   }
 
   try {
+    console.log('Starting upload to Wasabi...')
+    
     // Get secrets
     const WASABI_ACCESS_KEY = Deno.env.get('WASABI_ACCESS_KEY')
     const WASABI_SECRET_KEY = Deno.env.get('WASABI_SECRET_KEY')
@@ -55,10 +58,14 @@ serve(async (req) => {
       })
     }
 
+    console.log('User authenticated:', user.id)
+
     const body: UploadRequest = await req.json()
+    console.log('Received file upload request for:', body.fileName)
     
     // Decode base64 file
     const fileBuffer = Uint8Array.from(atob(body.file), c => c.charCodeAt(0))
+    console.log('File decoded, size:', fileBuffer.length)
     
     // Generate unique filename
     const timestamp = Date.now()
@@ -66,81 +73,34 @@ serve(async (req) => {
     const fileExt = body.fileName.split('.').pop()
     const wasabiFileName = `${user.id}/${timestamp}-${randomId}.${fileExt}`
 
-    // Upload to Wasabi S3
-    const wasabiEndpoint = 'https://s3.us-central-1.wasabisys.com'
-    const bucketName = 'video-rec'
-    
-    // Create S3 upload request
-    const uploadUrl = `${wasabiEndpoint}/${bucketName}/${wasabiFileName}`
-    
-    // Create AWS Signature V4 for authentication
-    const region = 'us-central-1'
-    const service = 's3'
-    const method = 'PUT'
-    const host = 's3.us-central-1.wasabisys.com'
-    
-    const now = new Date()
-    const dateStamp = now.toISOString().slice(0, 10).replace(/-/g, '')
-    const amzDate = now.toISOString().replace(/[:\-]|\.\d{3}/g, '')
-    
-    // Create canonical request
-    const canonicalUri = `/${bucketName}/${wasabiFileName}`
-    const canonicalQueryString = ''
-    const canonicalHeaders = `host:${host}\nx-amz-date:${amzDate}\n`
-    const signedHeaders = 'host;x-amz-date'
-    
-    // Create payload hash
-    const encoder = new TextEncoder()
-    const payloadBuffer = encoder.encode('')
-    const payloadHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', fileBuffer)))
-      .map(b => b.toString(16).padStart(2, '0')).join('')
-    
-    const canonicalRequest = `${method}\n${canonicalUri}\n${canonicalQueryString}\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`
-    
-    // Create string to sign
-    const algorithm = 'AWS4-HMAC-SHA256'
-    const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`
-    const stringToSign = `${algorithm}\n${amzDate}\n${credentialScope}\n${Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(canonicalRequest))))
-      .map(b => b.toString(16).padStart(2, '0')).join('')}`
-    
-    // Create signing key
-    const getSignatureKey = async (key: string, dateStamp: string, regionName: string, serviceName: string) => {
-      const kDate = await crypto.subtle.importKey('raw', encoder.encode(`AWS4${key}`), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-      const kRegion = await crypto.subtle.importKey('raw', new Uint8Array(await crypto.subtle.sign('HMAC', kDate, encoder.encode(dateStamp))), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-      const kService = await crypto.subtle.importKey('raw', new Uint8Array(await crypto.subtle.sign('HMAC', kRegion, encoder.encode(regionName))), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-      const kSigning = await crypto.subtle.importKey('raw', new Uint8Array(await crypto.subtle.sign('HMAC', kService, encoder.encode(serviceName))), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-      return await crypto.subtle.importKey('raw', new Uint8Array(await crypto.subtle.sign('HMAC', kSigning, encoder.encode('aws4_request'))), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
-    }
-    
-    const signingKey = await getSignatureKey(WASABI_SECRET_KEY, dateStamp, region, service)
-    const signature = Array.from(new Uint8Array(await crypto.subtle.sign('HMAC', signingKey, encoder.encode(stringToSign))))
-      .map(b => b.toString(16).padStart(2, '0')).join('')
-    
-    // Create authorization header
-    const authorization = `${algorithm} Credential=${WASABI_ACCESS_KEY}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`
-    
-    // Upload file to Wasabi
-    const uploadResponse = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: {
-        'Authorization': authorization,
-        'x-amz-date': amzDate,
-        'Content-Type': body.contentType,
-        'Content-Length': fileBuffer.length.toString(),
+    console.log('Generated Wasabi filename:', wasabiFileName)
+
+    // Configure S3 client for Wasabi
+    const s3Client = new S3Client({
+      region: 'us-central-1',
+      endpoint: 'https://s3.us-central-1.wasabisys.com',
+      credentials: {
+        accessKeyId: WASABI_ACCESS_KEY,
+        secretAccessKey: WASABI_SECRET_KEY,
       },
-      body: fileBuffer,
     })
 
-    if (!uploadResponse.ok) {
-      const errorText = await uploadResponse.text()
-      console.error('Wasabi upload failed:', errorText)
-      throw new Error(`Wasabi upload failed: ${uploadResponse.status}`)
-    }
+    // Upload to Wasabi
+    const uploadCommand = new PutObjectCommand({
+      Bucket: 'video-rec',
+      Key: wasabiFileName,
+      Body: fileBuffer,
+      ContentType: body.contentType,
+    })
 
-    console.log('File uploaded to Wasabi successfully')
+    console.log('Uploading to Wasabi...')
+    const uploadResult = await s3Client.send(uploadCommand)
+    console.log('Wasabi upload successful:', uploadResult.$metadata.httpStatusCode)
 
     // Create file URL (Wasabi public URL)
-    const fileUrl = `${wasabiEndpoint}/${bucketName}/${wasabiFileName}`
+    const fileUrl = `https://s3.us-central-1.wasabisys.com/video-rec/${wasabiFileName}`
+    
+    console.log('Creating database record...')
     
     // Save video record to database
     const { data: videoData, error: dbError } = await supabase
