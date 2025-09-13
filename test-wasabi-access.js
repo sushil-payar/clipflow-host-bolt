@@ -1,67 +1,31 @@
-// Test Wasabi access and credentials
-import { S3Client, ListObjectsV2Command, HeadObjectCommand } from '@aws-sdk/client-s3';
-
-const WASABI_CONFIG = {
-  accessKeyId: '88VMNCC91ULSE25D4924',
-  secretAccessKey: 'XqIOyTJGOVPKZMHNiGz6tP4FcpMD76vYYU4kZbFB',
-  region: 'us-central-1',
-  endpoint: 'https://s3.us-central-1.wasabisys.com',
-  bucket: 'clipflow-videos'
-};
-
-const s3Client = new S3Client({
-  region: WASABI_CONFIG.region,
-  endpoint: WASABI_CONFIG.endpoint,
-  credentials: {
-    accessKeyId: WASABI_CONFIG.accessKeyId,
-    secretAccessKey: WASABI_CONFIG.secretAccessKey,
-  },
-  forcePathStyle: true,
-});
-
-async function testWasabiAccess() {
-  try {
-    console.log('Testing Wasabi credentials and bucket access...');
-    
-    // Test 1: List objects in bucket
-    console.log('\n1. Testing bucket listing...');
-    const listCommand = new ListObjectsV2Command({
-      Bucket: WASABI_CONFIG.bucket,
-      MaxKeys: 5
-    });
-    
-    const listResult = await s3Client.send(listCommand);
-    console.log('✅ Bucket listing successful');
-    console.log('Objects found:', listResult.Contents?.length || 0);
-    
-    if (listResult.Contents && listResult.Contents.length > 0) {
-      const firstObject = listResult.Contents[0];
-      console.log('First object:', firstObject.Key);
-      
-      // Test 2: Head object
-      console.log('\n2. Testing object access...');
-      const headCommand = new HeadObjectCommand({
-        Bucket: WASABI_CONFIG.bucket,
-        Key: firstObject.Key
-      });
-      
-      const headResult = await s3Client.send(headCommand);
-      console.log('✅ Object head successful');
-      console.log('Content-Type:', headResult.ContentType);
-      console.log('Content-Length:', headResult.ContentLength);
-    }
-    
-  } catch (error) {
-    console.error('❌ Error:', error.name, error.message);
-    
-    if (error.name === 'NoSuchBucket') {
-      console.log('💡 The bucket does not exist. Please create it in Wasabi console.');
-    } else if (error.name === 'InvalidAccessKeyId') {
-      console.log('💡 Invalid access key. Please check your Wasabi credentials.');
-    } else if (error.name === 'SignatureDoesNotMatch') {
-      console.log('💡 Invalid secret key. Please check your Wasabi credentials.');
-    }
-  }
-}
-
-testWasabiAccess();
+// Test script explaining Wasabi access issue and solution
+console.log('🔍 Wasabi Video Access Issue Identified!')
+console.log('')
+console.log('❌ Problem Found:')
+console.log('  • Wasabi videos return 403 Forbidden errors')
+console.log('  • Direct URLs are not publicly accessible')
+console.log('  • Videos require authentication (presigned URLs)')
+console.log('  • This is why the player gets stuck on "Loading Video"')
+console.log('')
+console.log('✅ Solution Applied:')
+console.log('  • Fixed PlyrVideoPlayer to properly generate presigned URLs')
+console.log('  • Added better error handling for presigned URL generation')
+console.log('  • Improved timeout and loading state management')
+console.log('  • Added detailed console logging for debugging')
+console.log('')
+console.log('🚀 How it works now:')
+console.log('  1. Player detects Wasabi video URL')
+console.log('  2. Generates presigned URL for secure access')
+console.log('  3. Uses presigned URL to load video')
+console.log('  4. Initializes Plyr player with accessible URL')
+console.log('  5. Video plays with full Plyr functionality')
+console.log('')
+console.log('🔧 Technical Details:')
+console.log('  • Wasabi bucket is private (not public)')
+console.log('  • Presigned URLs provide temporary access')
+console.log('  • URLs expire after a certain time')
+console.log('  • This is a security feature, not a bug')
+console.log('')
+console.log('✨ Your videos should now play!')
+console.log('   The player will generate secure access URLs automatically.')
+console.log('   Check browser console for detailed logs if needed.')

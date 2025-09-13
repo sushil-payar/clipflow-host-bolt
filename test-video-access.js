@@ -1,35 +1,47 @@
-// Test script to check if a video URL is accessible
-// Usage: node test-video-access.js <video-url>
-
-const videoUrl = process.argv[2];
-
-if (!videoUrl) {
-  console.log('Usage: node test-video-access.js <video-url>');
-  console.log('Example: node test-video-access.js "https://clipflow-videos.s3.us-central-1.wasabisys.com/438811cc-145c-4275-8079-7e36fae958dc/1757773256000-0vfqp4.mp4"');
-  process.exit(1);
-}
-
-async function testVideoAccess() {
+// Test script to check video URL accessibility
+const testVideoUrl = async (url) => {
+  console.log('🔍 Testing video URL accessibility...');
+  console.log('URL:', url);
+  
   try {
-    console.log('Testing video URL:', videoUrl);
+    // Test with HEAD request first
+    console.log('Testing HEAD request...');
+    const headResponse = await fetch(url, { method: 'HEAD' });
+    console.log('HEAD Response:', {
+      status: headResponse.status,
+      statusText: headResponse.statusText,
+      headers: Object.fromEntries(headResponse.headers.entries())
+    });
     
-    const response = await fetch(videoUrl, { method: 'HEAD' });
-    
-    console.log('Response status:', response.status);
-    console.log('Response headers:');
-    for (const [key, value] of response.headers.entries()) {
-      console.log(`  ${key}: ${value}`);
+    if (headResponse.ok) {
+      console.log('✅ URL is accessible via HEAD request');
+    } else {
+      console.log('❌ URL not accessible via HEAD request');
     }
     
-    if (response.ok) {
-      console.log('✅ Video is accessible!');
+    // Test with GET request (first few bytes)
+    console.log('Testing GET request (first 1KB)...');
+    const getResponse = await fetch(url, { 
+      method: 'GET',
+      headers: { 'Range': 'bytes=0-1023' }
+    });
+    console.log('GET Response:', {
+      status: getResponse.status,
+      statusText: getResponse.statusText,
+      headers: Object.fromEntries(getResponse.headers.entries())
+    });
+    
+    if (getResponse.ok) {
+      console.log('✅ URL is accessible via GET request');
     } else {
-      console.log('❌ Video is not accessible:', response.status, response.statusText);
+      console.log('❌ URL not accessible via GET request');
     }
     
   } catch (error) {
-    console.error('❌ Error testing video access:', error.message);
+    console.error('❌ Error testing URL:', error);
   }
-}
+};
 
-testVideoAccess();
+// Test with a sample Wasabi URL
+const sampleUrl = 'https://clipflow-videos.s3.us-central-1.wasabisys.com/438811cc-145c-4275-8079-7e36fae958dc/1757789133636-aftpzk.mp4';
+testVideoUrl(sampleUrl);

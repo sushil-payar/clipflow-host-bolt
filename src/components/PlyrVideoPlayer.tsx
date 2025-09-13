@@ -65,9 +65,17 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
       try {
         let finalSrc = src;
         
-        if (src.includes('wasabisys.com') && !isHLSStream(src)) {
+        if (src.includes('wasabisys.com')) {
           console.log('Detected Wasabi video, generating presigned URL...');
-          finalSrc = await handlePresignedUrl(src);
+          try {
+            finalSrc = await handlePresignedUrl(src);
+            console.log('Presigned URL generated successfully');
+          } catch (presignedError) {
+            console.error('Failed to generate presigned URL:', presignedError);
+            setError('Failed to generate secure video access. Please try refreshing the page.');
+            setIsLoading(false);
+            return;
+          }
         } else {
           console.log('Using original URL:', src);
           setVideoSrc(src);

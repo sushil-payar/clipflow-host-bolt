@@ -44,8 +44,20 @@ const SimpleVideoPlayer = ({ src, poster, className }: SimpleVideoPlayerProps) =
     }
 
     // Set video source directly
+    console.log('Setting video source to:', src);
     video.src = src;
     video.poster = poster || '';
+    
+    // Add more event listeners for debugging
+    video.addEventListener('loadstart', () => console.log('Video loadstart'));
+    video.addEventListener('loadedmetadata', () => console.log('Video loadedmetadata'));
+    video.addEventListener('loadeddata', () => console.log('Video loadeddata'));
+    video.addEventListener('canplay', () => console.log('Video canplay'));
+    video.addEventListener('canplaythrough', () => console.log('Video canplaythrough'));
+    video.addEventListener('error', (e) => {
+      console.error('Video error:', e);
+      console.error('Video error details:', video.error);
+    });
 
     // Initialize Plyr
     try {
