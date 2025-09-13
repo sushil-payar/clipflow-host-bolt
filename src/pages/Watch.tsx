@@ -62,8 +62,8 @@ const Watch = () => {
     }
   };
 
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 MB';
+  const formatFileSize = (bytes: number | null | undefined): string => {
+    if (!bytes || bytes === 0 || isNaN(bytes)) return 'Unknown';
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -136,6 +136,20 @@ const Watch = () => {
               src={video.file_url}
               poster={video.thumbnail_url}
             />
+            
+            {/* Debug Info - Remove in production */}
+            <div className="mt-4 p-4 bg-gray-900 rounded-lg border border-gray-700">
+              <h4 className="text-sm font-medium text-white mb-2">Debug Info</h4>
+              <div className="text-xs text-gray-400 space-y-1">
+                <div><strong>Original URL:</strong> <a href={video.file_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline break-all">{video.file_url}</a></div>
+                <div><strong>Status:</strong> {video.status}</div>
+                <div><strong>File Size:</strong> {formatFileSize(video.file_size)}</div>
+                <div><strong>Created:</strong> {new Date(video.created_at).toLocaleString()}</div>
+                <div className="mt-2 p-2 bg-gray-800 rounded text-xs">
+                  <strong>Note:</strong> The video player will automatically generate a presigned URL for Wasabi videos to ensure access.
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Video Info */}
@@ -205,7 +219,9 @@ const Watch = () => {
                   
                   <div>
                     <p className="text-sm text-muted-foreground">Compression</p>
-                    <p className="font-medium text-green-500">{video.compression_ratio}% saved</p>
+                    <p className="font-medium text-green-500">
+                      {video.compression_ratio ? `${video.compression_ratio}% saved` : 'Not available'}
+                    </p>
                   </div>
                   
                   <div>

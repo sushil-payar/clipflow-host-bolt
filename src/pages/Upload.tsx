@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import Navigation from "@/components/Navigation";
 import { supabase } from "@/integrations/supabase/client";
+import { uploadVideoDirectToWasabi } from "@/utils/wasabi-direct-upload";
 import { 
   Upload as UploadIcon, 
   FileVideo, 
@@ -80,6 +81,22 @@ const Upload = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  // Convert a File to a base64 string without using large spreads
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // result is a data URL like: data:video/mp4;base64,<base64>
+        const commaIndex = result.indexOf(',');
+        const base64 = commaIndex >= 0 ? result.substring(commaIndex + 1) : result;
+        resolve(base64);
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  };
+
   const handleUpload = async () => {
     if (files.length === 0) {
       toast({
@@ -123,33 +140,104 @@ const Upload = () => {
         const progressBase = (i / files.length) * 100;
         const progressStep = 100 / files.length;
         
-        setUploadProgress(progressBase + progressStep * 0.2);
+        setUploadProgress(progressBase + progressStep * 0.15);
 
-        // Convert file to base64
-        const fileBuffer = await file.arrayBuffer();
-        const base64File = btoa(String.fromCharCode(...new Uint8Array(fileBuffer)));
-        
-        setUploadProgress(progressBase + progressStep * 0.5);
+        try {
+          // Try the edge function first
+          const getUrl = await supabase.functions.invoke('upload-to-wasabi', {
+            body: {
+              action: 'get_url',
+              fileName: file.name,
+              contentType: file.type,
+            },
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          });
 
-        // Upload to Wasabi via edge function
-        const { data, error } = await supabase.functions.invoke('upload-to-wasabi', {
-          body: {
-            file: base64File,
-            fileName: file.name,
-            contentType: file.type,
-            title: i === 0 ? title : `${title} (${i + 1})`,
-            description,
-            originalSize: file.size
-          },
-          headers: {
-            Authorization: `Bearer ${session.access_token}`
+          if (getUrl.error) {
+            console.error('Supabase function error:', getUrl.error);
+            throw new Error(`Function error: ${JSON.stringify(getUrl.error)}`);
           }
-        });
+          if ((getUrl.data as any)?.error) {
+            console.error('Function returned error:', (getUrl.data as any).error);
+            throw new Error(`Function error: ${(getUrl.data as any).error}`);
+          }
 
-        if (error) throw error;
-        if (data.error) throw new Error(data.error);
+          const { uploadUrl, key, publicUrl } = getUrl.data as { uploadUrl: string; key: string; publicUrl: string };
 
-        setUploadProgress(progressBase + progressStep);
+          setUploadProgress(progressBase + progressStep * 0.4);
+
+          // 2) PUT the file directly to Wasabi
+          const putResp = await fetch(uploadUrl, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': file.type,
+            },
+            body: file,
+          });
+
+          if (!putResp.ok) {
+            const text = await putResp.text();
+            throw new Error(`Wasabi upload failed: ${putResp.status} ${text}`);
+          }
+
+          setUploadProgress(progressBase + progressStep * 0.75);
+
+          // 3) Confirm and create DB record
+          const confirmResp = await supabase.functions.invoke('upload-to-wasabi', {
+            body: {
+              action: 'confirm',
+              key,
+              title: i === 0 ? title : `${title} (${i + 1})`,
+              description,
+              originalFileName: file.name,
+              contentType: file.type,
+              originalSize: file.size,
+            },
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          });
+
+          if (confirmResp.error) {
+            console.error('Supabase function error:', confirmResp.error);
+            throw new Error(`Function error: ${JSON.stringify(confirmResp.error)}`);
+          }
+          if ((confirmResp.data as any)?.error) {
+            console.error('Function returned error:', (confirmResp.data as any).error);
+            throw new Error(`Function error: ${(confirmResp.data as any).error}`);
+          }
+
+          setUploadProgress(progressBase + progressStep);
+        } catch (functionError) {
+          console.error('Upload failed via edge function, trying direct upload:', functionError);
+          
+          // Show user that we're trying fallback method
+          toast({
+            title: "Trying alternative upload method",
+            description: "Edge function failed, using direct upload...",
+            duration: 3000,
+          });
+          
+          // Fallback to direct upload
+          setUploadProgress(progressBase + progressStep * 0.2);
+          
+          const directUploadResult = await uploadVideoDirectToWasabi(
+            file,
+            i === 0 ? title : `${title} (${i + 1})`,
+            description,
+            supabase
+          );
+
+          if (!directUploadResult.success) {
+            console.error('Direct upload also failed:', directUploadResult.error);
+            throw new Error(directUploadResult.error || 'Direct upload failed');
+          }
+
+          console.log('Direct upload successful:', directUploadResult);
+          setUploadProgress(progressBase + progressStep);
+        }
       }
 
       toast({
@@ -164,6 +252,11 @@ const Upload = () => {
       
     } catch (error) {
       console.error('Upload error:', error);
+      console.error('Error details:', {
+        name: error instanceof Error ? error.name : 'Unknown',
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       toast({
         title: "Upload Failed",
         description: error instanceof Error ? error.message : "Failed to upload video",
@@ -363,19 +456,19 @@ const Upload = () => {
             </Card>
           </div>
 
-          {/* Backend Integration Notice */}
-          <Card className="mt-8 bg-yellow-500/10 border-yellow-500/20">
+          {/* Upload Status Notice */}
+          <Card className="mt-8 bg-green-500/10 border-green-500/20">
             <CardContent className="p-6">
               <div className="flex items-start gap-3">
-                <AlertCircle className="w-6 h-6 text-yellow-500 flex-shrink-0 mt-1" />
+                <CheckCircle className="w-6 h-6 text-green-500 flex-shrink-0 mt-1" />
                 <div>
-                  <h3 className="font-medium text-yellow-500 mb-2">Backend Integration Required</h3>
+                  <h3 className="font-medium text-green-500 mb-2">Upload Ready</h3>
                   <p className="text-sm text-muted-foreground mb-3">
-                    To enable video compression and Wasabi storage upload, you'll need to connect your Lovable project to Supabase. 
-                    This will allow us to create the backend functions for processing and storing your videos.
+                    Video uploads are now working! The system will first try to use the Supabase Edge Function for optimal performance, 
+                    and automatically fall back to direct upload if needed.
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Click the green Supabase button in the top-right corner to get started.
+                    Your videos will be uploaded directly to Wasabi cloud storage and stored securely.
                   </p>
                 </div>
               </div>
