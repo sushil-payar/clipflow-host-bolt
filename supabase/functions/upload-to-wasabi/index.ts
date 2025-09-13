@@ -8,34 +8,58 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// Video compression function using FFmpeg
-async function compressVideo(file: File): Promise<Uint8Array> {
-  console.log('Starting video compression...')
+// HLS conversion function using FFmpeg
+async function convertToHLS(file: File): Promise<{
+  masterPlaylist: string;
+  segments: { name: string; data: Uint8Array }[];
+  compressedSize: number;
+}> {
+  console.log('Starting HLS conversion...')
   
   // Convert file to array buffer
   const arrayBuffer = await file.arrayBuffer()
   const inputData = new Uint8Array(arrayBuffer)
   
-  // Create a temporary file for input
-  const tempInputPath = `/tmp/input_${Date.now()}.${file.name.split('.').pop()}`
-  const tempOutputPath = `/tmp/output_${Date.now()}.mp4`
+  // Create temporary directory for HLS output
+  const timestamp = Date.now()
+  const tempInputPath = `/tmp/input_${timestamp}.${file.name.split('.').pop()}`
+  const hlsOutputDir = `/tmp/hls_${timestamp}`
+  const masterPlaylistPath = `${hlsOutputDir}/master.m3u8`
   
   try {
+    // Create HLS output directory
+    await Deno.mkdir(hlsOutputDir, { recursive: true })
+    
     // Write input file
     await Deno.writeFile(tempInputPath, inputData)
     
-    // Run FFmpeg compression command
+    // Run FFmpeg HLS conversion command with multiple bitrates
     const command = new Deno.Command('ffmpeg', {
       args: [
         '-i', tempInputPath,
         '-c:v', 'libx264',
-        '-crf', '28', // Higher CRF = more compression (18-28 is good range)
-        '-preset', 'fast', // Fast encoding
         '-c:a', 'aac',
-        '-b:a', '128k', // Audio bitrate
-        '-movflags', '+faststart', // Optimize for streaming
-        '-y', // Overwrite output file
-        tempOutputPath
+        '-b:a', '128k',
+        '-preset', 'fast',
+        '-hls_time', '10', // 10 second segments
+        '-hls_list_size', '0', // Keep all segments in playlist
+        '-hls_segment_filename', `${hlsOutputDir}/segment_%03d.ts`,
+        '-f', 'hls',
+        '-master_pl_name', 'master.m3u8',
+        '-var_stream_map', 'v:0,a:0 v:0,a:0 v:0,a:0', // 3 different bitrates
+        '-map', '0:v:0',
+        '-map', '0:a:0',
+        '-map', '0:v:0',
+        '-map', '0:a:0',
+        '-map', '0:v:0',
+        '-map', '0:a:0',
+        '-b:v:0', '1000k', // 1Mbps
+        '-b:v:1', '500k',  // 500kbps
+        '-b:v:2', '250k',  // 250kbps
+        '-s:v:1', '854x480', // 480p for medium quality
+        '-s:v:2', '640x360', // 360p for low quality
+        '-y', // Overwrite output files
+        masterPlaylistPath
       ],
       stdout: 'piped',
       stderr: 'piped'
@@ -45,20 +69,44 @@ async function compressVideo(file: File): Promise<Uint8Array> {
     
     if (code !== 0) {
       const errorText = new TextDecoder().decode(stderr)
-      console.error('FFmpeg error:', errorText)
-      throw new Error(`FFmpeg compression failed: ${errorText}`)
+      console.error('FFmpeg HLS error:', errorText)
+      throw new Error(`FFmpeg HLS conversion failed: ${errorText}`)
     }
     
-    // Read compressed file
-    const compressedData = await Deno.readFile(tempOutputPath)
-    console.log(`Compression complete. Original size: ${file.size} bytes, Compressed size: ${compressedData.length} bytes`)
+    // Read master playlist
+    const masterPlaylist = await Deno.readTextFile(masterPlaylistPath)
     
-    return compressedData
+    // Read all segment files
+    const segments: { name: string; data: Uint8Array }[] = []
+    let totalSize = 0
+    
+    // Read individual playlist files and segments
+    const files = []
+    for await (const dirEntry of Deno.readDir(hlsOutputDir)) {
+      files.push(dirEntry.name)
+    }
+    
+    for (const fileName of files) {
+      if (fileName.endsWith('.ts') || fileName.endsWith('.m3u8')) {
+        const filePath = `${hlsOutputDir}/${fileName}`
+        const data = await Deno.readFile(filePath)
+        segments.push({ name: fileName, data })
+        totalSize += data.length
+      }
+    }
+    
+    console.log(`HLS conversion complete. Generated ${segments.length} files, total size: ${totalSize} bytes`)
+    
+    return {
+      masterPlaylist,
+      segments,
+      compressedSize: totalSize
+    }
   } finally {
     // Clean up temporary files
     try {
       await Deno.remove(tempInputPath)
-      await Deno.remove(tempOutputPath)
+      await Deno.remove(hlsOutputDir, { recursive: true })
     } catch (e) {
       console.warn('Failed to clean up temp files:', e)
     }
@@ -360,29 +408,46 @@ serve(async (req) => {
 
         console.log(`Processing video: ${body.file.name} (${body.file.size} bytes)`)
         
-        // Compress the video
-        const compressedData = await compressVideo(body.file)
+        // Convert video to HLS
+        const hlsResult = await convertToHLS(body.file)
         
-        // Generate unique filename for compressed video
+        // Generate unique directory for HLS files
         const timestamp = Date.now()
         const randomId = Math.random().toString(36).substring(2, 8)
-        const key = `${user.id}/${timestamp}-${randomId}-compressed.mp4`
+        const hlsDir = `${user.id}/${timestamp}-${randomId}-hls`
         
-        // Upload compressed video to Wasabi
-        const command = new PutObjectCommand({
+        // Upload master playlist
+        const masterPlaylistKey = `${hlsDir}/master.m3u8`
+        const masterPlaylistCommand = new PutObjectCommand({
           Bucket: WASABI_BUCKET,
-          Key: key,
-          Body: compressedData,
-          ContentType: 'video/mp4',
+          Key: masterPlaylistKey,
+          Body: hlsResult.masterPlaylist,
+          ContentType: 'application/vnd.apple.mpegurl',
           ContentDisposition: 'inline',
         })
+        await s3Client.send(masterPlaylistCommand)
         
-        await s3Client.send(command)
+        // Upload all segments
+        for (const segment of hlsResult.segments) {
+          const segmentKey = `${hlsDir}/${segment.name}`
+          const contentType = segment.name.endsWith('.m3u8') 
+            ? 'application/vnd.apple.mpegurl' 
+            : 'video/mp2t'
+          
+          const segmentCommand = new PutObjectCommand({
+            Bucket: WASABI_BUCKET,
+            Key: segmentKey,
+            Body: segment.data,
+            ContentType: contentType,
+            ContentDisposition: 'inline',
+          })
+          await s3Client.send(segmentCommand)
+        }
         
-        const publicUrl = `${WASABI_ENDPOINT.replace(/\/$/, '')}/${WASABI_BUCKET}/${key}`
+        const publicUrl = `${WASABI_ENDPOINT.replace(/\/$/, '')}/${WASABI_BUCKET}/${masterPlaylistKey}`
         
         // Calculate compression ratio
-        const compressionRatio = ((body.file.size - compressedData.length) / body.file.size) * 100
+        const compressionRatio = ((body.file.size - hlsResult.compressedSize) / body.file.size) * 100
         
         // Save video record to database
         const { data: videoData, error: dbError } = await supabase
@@ -394,7 +459,7 @@ serve(async (req) => {
             original_filename: body.file.name,
             file_url: publicUrl,
             original_size: body.file.size,
-            file_size: compressedData.length,
+            file_size: hlsResult.compressedSize,
             compression_ratio: compressionRatio,
             status: 'processed'
           })
@@ -411,13 +476,15 @@ serve(async (req) => {
           })
         }
 
-        console.log('Video uploaded and compressed successfully:', videoData?.id)
+        console.log('Video converted to HLS and uploaded successfully:', videoData?.id)
         return new Response(JSON.stringify({ 
           success: true, 
           video: videoData,
           compressionRatio: compressionRatio,
           originalSize: body.file.size,
-          compressedSize: compressedData.length
+          compressedSize: hlsResult.compressedSize,
+          hlsUrl: publicUrl,
+          segmentCount: hlsResult.segments.length
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           status: 200,

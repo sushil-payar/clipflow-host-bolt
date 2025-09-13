@@ -31,6 +31,8 @@ const Upload = () => {
     originalSize: number;
     compressedSize: number;
     compressionRatio: number;
+    hlsUrl?: string;
+    segmentCount?: number;
   } | null>(null);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -159,7 +161,9 @@ const Upload = () => {
             setCompressionInfo({
               originalSize: result.originalSize,
               compressedSize: result.compressedSize,
-              compressionRatio: result.compressionRatio
+              compressionRatio: result.compressionRatio,
+              hlsUrl: result.hlsUrl,
+              segmentCount: result.segmentCount
             });
           }
 
@@ -238,7 +242,7 @@ const Upload = () => {
           <div className="text-center mb-8">
             <h1 className="text-4xl font-bold mb-4">Upload Videos</h1>
             <p className="text-muted-foreground text-lg">
-              Upload your videos for automatic 80% compression and fast cloud streaming
+              Upload your videos for HLS conversion and adaptive streaming
             </p>
           </div>
 
@@ -365,20 +369,27 @@ const Upload = () => {
                 {/* Compression Info */}
                 {compressionInfo && (
                   <div className="space-y-2 p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
-                    <h4 className="font-medium text-green-500">Compression Results</h4>
+                    <h4 className="font-medium text-green-500">HLS Conversion Results</h4>
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div>
                         <span className="text-muted-foreground">Original Size:</span>
                         <p className="font-medium">{formatFileSize(compressionInfo.originalSize)}</p>
                       </div>
                       <div>
-                        <span className="text-muted-foreground">Compressed Size:</span>
+                        <span className="text-muted-foreground">HLS Size:</span>
                         <p className="font-medium">{formatFileSize(compressionInfo.compressedSize)}</p>
                       </div>
-                      <div className="col-span-2">
+                      <div>
                         <span className="text-muted-foreground">Space Saved:</span>
                         <p className="font-medium text-green-500">{formatCompressionRatio(compressionInfo.compressionRatio)}</p>
                       </div>
+                      <div>
+                        <span className="text-muted-foreground">Segments:</span>
+                        <p className="font-medium">{compressionInfo.segmentCount || 'N/A'}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 p-2 bg-blue-500/10 border border-blue-500/20 rounded text-xs">
+                      <span className="text-blue-400 font-medium">✨ HLS Streaming:</span> Your video now supports adaptive bitrate streaming for instant playback on any device!
                     </div>
                   </div>
                 )}
@@ -410,9 +421,9 @@ const Upload = () => {
             <Card className="bg-video-surface border-video-border">
               <CardContent className="p-4 text-center">
                 <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-2" />
-                <h3 className="font-medium mb-1">Auto Compression</h3>
+                <h3 className="font-medium mb-1">HLS Streaming</h3>
                 <p className="text-sm text-muted-foreground">
-                  Videos compressed by 80% for faster streaming
+                  Adaptive bitrate streaming for instant playback
                 </p>
               </CardContent>
             </Card>
@@ -444,13 +455,13 @@ const Upload = () => {
               <div className="flex items-start gap-3">
                 <CheckCircle className="w-6 h-6 text-green-500 flex-shrink-0 mt-1" />
                 <div>
-                  <h3 className="font-medium text-green-500 mb-2">Compression & Upload Ready</h3>
+                  <h3 className="font-medium text-green-500 mb-2">HLS Streaming Ready</h3>
                   <p className="text-sm text-muted-foreground mb-3">
-                    Videos are automatically compressed by 80% for faster streaming and then uploaded to Wasabi cloud storage. 
-                    The system uses FFmpeg for high-quality compression while maintaining video quality.
+                    Videos are automatically converted to HLS format with multiple bitrates for adaptive streaming. 
+                    The system uses FFmpeg to create optimized segments for instant playback on any device.
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Your compressed videos will stream instantly from anywhere with optimized file sizes.
+                    Your HLS videos will start playing immediately with adaptive quality based on network conditions.
                   </p>
                 </div>
               </div>

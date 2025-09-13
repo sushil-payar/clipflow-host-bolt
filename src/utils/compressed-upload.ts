@@ -6,6 +6,8 @@ export interface CompressedUploadResult {
   compressionRatio?: number
   originalSize?: number
   compressedSize?: number
+  hlsUrl?: string
+  segmentCount?: number
   error?: string
 }
 
