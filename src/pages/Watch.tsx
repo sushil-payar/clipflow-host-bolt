@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import Navigation from "@/components/Navigation";
 import PlyrVideoPlayer from "@/components/PlyrVideoPlayer";
+import SimpleVideoPlayer from "@/components/SimpleVideoPlayer";
 import { supabase } from "@/integrations/supabase/client";
 import { 
   Eye, 
@@ -136,7 +137,7 @@ const Watch = () => {
         <div className="container mx-auto max-w-4xl">
           {/* Video Player */}
           <div className="mb-6">
-            <PlyrVideoPlayer 
+            <SimpleVideoPlayer 
               src={video.file_url}
               poster={video.thumbnail_url}
             />

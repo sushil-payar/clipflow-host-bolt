@@ -36,10 +36,12 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
     try {
       console.log('Generating presigned URL for:', url);
       const presignedUrl = await generatePresignedVideoUrl(url);
+      console.log('Presigned URL generated:', presignedUrl);
       setVideoSrc(presignedUrl);
       return presignedUrl;
     } catch (error) {
       console.error('Failed to generate presigned URL:', error);
+      console.log('Falling back to original URL:', url);
       setVideoSrc(url);
       return url;
     }
@@ -60,20 +62,39 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
 
     // Handle presigned URL generation for Wasabi videos
     const initializeVideo = async () => {
-      let finalSrc = src;
-      
-      if (src.includes('wasabisys.com') && !isHLSStream(src)) {
-        finalSrc = await handlePresignedUrl(src);
-      } else {
-        setVideoSrc(src);
-      }
+      try {
+        let finalSrc = src;
+        
+        if (src.includes('wasabisys.com') && !isHLSStream(src)) {
+          console.log('Detected Wasabi video, generating presigned URL...');
+          finalSrc = await handlePresignedUrl(src);
+        } else {
+          console.log('Using original URL:', src);
+          setVideoSrc(src);
+        }
 
-      await initializePlayer(finalSrc);
+        console.log('Initializing player with URL:', finalSrc);
+        await initializePlayer(finalSrc);
+      } catch (error) {
+        console.error('Error initializing video:', error);
+        setError('Failed to load video');
+        setIsLoading(false);
+      }
     };
+
+    // Add timeout to prevent infinite loading
+    const timeoutId = setTimeout(() => {
+      if (isLoading) {
+        console.error('Video loading timeout');
+        setError('Video loading timeout - please try refreshing');
+        setIsLoading(false);
+      }
+    }, 30000); // 30 second timeout
 
     initializeVideo();
 
     return () => {
+      clearTimeout(timeoutId);
       if (plyrRef.current) {
         plyrRef.current.destroy();
         plyrRef.current = null;
@@ -99,7 +120,8 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
       hlsRef.current = null;
     }
       // Initialize Plyr
-      plyrRef.current = new Plyr(video, {
+      try {
+        plyrRef.current = new Plyr(video, {
         controls: [
           'play-large',
           'restart',
@@ -166,6 +188,13 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
         console.log('Video can start playing');
         setIsLoading(false);
       });
+
+      } catch (plyrError) {
+        console.error('Error initializing Plyr:', plyrError);
+        setError('Failed to initialize video player');
+        setIsLoading(false);
+        return;
+      }
     };
 
     if (isHLSStream(sourceUrl)) {
