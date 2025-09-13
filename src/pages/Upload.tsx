@@ -9,7 +9,8 @@ import { useToast } from "@/hooks/use-toast";
 import Navigation from "@/components/Navigation";
 import { supabase } from "@/integrations/supabase/client";
 import { uploadVideoDirectToWasabi } from "@/utils/wasabi-direct-upload";
-import { uploadAndCompressVideo, formatFileSize, formatCompressionRatio } from "@/utils/compressed-upload";
+import { uploadAndCompressVideo } from "@/utils/compressed-upload";
+import { compressVideo, formatFileSize, formatCompressionRatio } from "@/utils/video-compression";
 import { 
   Upload as UploadIcon, 
   FileVideo, 
@@ -145,63 +146,115 @@ const Upload = () => {
         setUploadProgress(progressBase + progressStep * 0.1);
 
         try {
-          // Use the new compressed upload function
-          const result = await uploadAndCompressVideo(
-            file,
-            i === 0 ? title : `${title} (${i + 1})`,
-            description
-          );
+          // First try client-side compression
+          try {
+            console.log('Starting client-side compression...');
+            const { compressedFile, originalSize, compressedSize, compressionRatio } = await compressVideo(file, { quality: 0.2 });
+            
+            console.log(`Video compressed: ${formatFileSize(originalSize)} → ${formatFileSize(compressedSize)} (${compressionRatio.toFixed(1)}% reduction)`);
+            
+            setUploadProgress(progressBase + progressStep * 0.3);
+            
+            const result = await uploadAndCompressVideo(
+              compressedFile,
+              i === 0 ? title : `${title} (${i + 1})`,
+              description
+            );
 
-          if (!result.success) {
-            throw new Error(result.error || 'Upload failed');
-          }
+            if (!result.success) {
+              throw new Error(result.error || 'Upload failed');
+            }
 
-          // Store compression info for the first file
-          if (i === 0 && result.compressionRatio && result.originalSize && result.compressedSize) {
-            setCompressionInfo({
-              originalSize: result.originalSize,
-              compressedSize: result.compressedSize,
-              compressionRatio: result.compressionRatio,
-              hlsUrl: result.hlsUrl,
-              segmentCount: result.segmentCount
+            // Store compression info for the first file
+            if (i === 0) {
+              setCompressionInfo({
+                originalSize: originalSize,
+                compressedSize: compressedSize,
+                compressionRatio: compressionRatio,
+                hlsUrl: result.hlsUrl,
+                segmentCount: result.segmentCount
+              });
+            }
+
+            setUploadProgress(progressBase + progressStep);
+            
+            toast({
+              title: "Video uploaded successfully!",
+              description: `"${i === 0 ? title : `${title} (${i + 1})`}" compressed ${compressionRatio.toFixed(1)}% and uploaded`,
+              duration: 3000,
             });
+
+          } catch (compressionError) {
+            console.error('Client-side compression failed, trying server compression:', compressionError);
+            
+            toast({
+              title: "Trying server compression",
+              description: "Client compression failed, using server-side compression...",
+              duration: 3000,
+            });
+            
+            const result = await uploadAndCompressVideo(
+              file,
+              i === 0 ? title : `${title} (${i + 1})`,
+              description
+            );
+
+            if (!result.success) {
+              console.error('Server compression also failed, trying direct upload...');
+              
+              toast({
+                title: "Trying direct upload",
+                description: "Server compression failed, using direct upload...",
+                duration: 3000,
+              });
+              
+              // Fallback to direct upload
+              setUploadProgress(progressBase + progressStep * 0.2);
+              
+              const directUploadResult = await uploadVideoDirectToWasabi(
+                file,
+                i === 0 ? title : `${title} (${i + 1})`,
+                description,
+                supabase
+              );
+
+              if (!directUploadResult.success) {
+                console.error('Direct upload also failed:', directUploadResult.error);
+                throw new Error(directUploadResult.error || 'All upload methods failed');
+              }
+
+              console.log('Direct upload successful:', directUploadResult);
+              setUploadProgress(progressBase + progressStep);
+              
+              toast({
+                title: "Video uploaded successfully!",
+                description: `"${i === 0 ? title : `${title} (${i + 1})`}" uploaded via direct method`,
+                duration: 3000,
+              });
+            } else {
+              // Store compression info for the first file
+              if (i === 0 && result.compressionRatio && result.originalSize && result.compressedSize) {
+                setCompressionInfo({
+                  originalSize: result.originalSize,
+                  compressedSize: result.compressedSize,
+                  compressionRatio: result.compressionRatio,
+                  hlsUrl: result.hlsUrl,
+                  segmentCount: result.segmentCount
+                });
+              }
+
+              setUploadProgress(progressBase + progressStep);
+              
+              toast({
+                title: "Video uploaded successfully!",
+                description: `"${i === 0 ? title : `${title} (${i + 1})`}" compressed and uploaded`,
+                duration: 3000,
+              });
+            }
           }
-
-          setUploadProgress(progressBase + progressStep);
-          
-          toast({
-            title: "Video uploaded successfully!",
-            description: `"${i === 0 ? title : `${title} (${i + 1})`}" compressed and uploaded`,
-            duration: 3000,
-          });
-
-        } catch (compressionError) {
-          console.error('Compressed upload failed, trying fallback:', compressionError);
-          
-          // Show user that we're trying fallback method
-          toast({
-            title: "Trying alternative upload method",
-            description: "Compression failed, using direct upload...",
-            duration: 3000,
-          });
-          
-          // Fallback to direct upload
-          setUploadProgress(progressBase + progressStep * 0.2);
-          
-          const directUploadResult = await uploadVideoDirectToWasabi(
-            file,
-            i === 0 ? title : `${title} (${i + 1})`,
-            description,
-            supabase
-          );
-
-          if (!directUploadResult.success) {
-            console.error('Direct upload also failed:', directUploadResult.error);
-            throw new Error(directUploadResult.error || 'Direct upload failed');
-          }
-
-          console.log('Direct upload successful:', directUploadResult);
-          setUploadProgress(progressBase + progressStep);
+        } catch (error) {
+          console.error('Upload failed for file:', file.name, error);
+          throw error;
         }
       }
 
