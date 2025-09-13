@@ -127,8 +127,9 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
-      // Initialize Plyr
-      try {
+
+    // Initialize Plyr
+    try {
         plyrRef.current = new Plyr(video, {
         controls: [
           'play-large',
@@ -368,5 +369,4 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
     </div>
   );
 };
-
 export default PlyrVideoPlayer;

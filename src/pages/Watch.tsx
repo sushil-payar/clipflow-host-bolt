@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import Navigation from "@/components/Navigation";
-import PlyrVideoPlayer from "@/components/PlyrVideoPlayer";
+import YouTubeLikePlayer from "@/components/YouTubeLikePlayer";
 import SimpleVideoPlayer from "@/components/SimpleVideoPlayer";
 import TestVideoPlayer from "@/components/TestVideoPlayer";
 import BasicVideoPlayer from "@/components/BasicVideoPlayer";
@@ -139,9 +139,10 @@ const Watch = () => {
         <div className="container mx-auto max-w-4xl">
           {/* Video Player */}
           <div className="mb-6">
-            <BasicVideoPlayer 
+            <YouTubeLikePlayer 
               src={video.file_url}
               poster={video.thumbnail_url}
+              title={video.title}
             />
             
             {/* Debug Info - Remove in production */}
@@ -149,15 +150,15 @@ const Watch = () => {
               <h4 className="text-sm font-medium text-white mb-2">Debug Info</h4>
               <div className="text-xs text-gray-400 space-y-1">
                 <div><strong>Stream Type:</strong> {isHLSStream(video.file_url) ? 'HLS (Adaptive Streaming)' : 'Direct Video'}</div>
-                <div><strong>Player:</strong> Plyr (Modern HTML5 Player)</div>
+                <div><strong>Player:</strong> YouTube-like Player (Modern HTML5 with Advanced Controls)</div>
                 <div><strong>Original URL:</strong> <a href={video.file_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline break-all">{video.file_url}</a></div>
                 <div><strong>Status:</strong> {video.status}</div>
                 <div><strong>File Size:</strong> {formatFileSize(video.file_size)}</div>
                 <div><strong>Created:</strong> {new Date(video.created_at).toLocaleString()}</div>
                 <div className="mt-2 p-2 bg-gray-800 rounded text-xs">
                   <strong>Note:</strong> {isHLSStream(video.file_url) 
-                    ? 'Plyr player with HLS streaming provides adaptive bitrate and modern controls for optimal playback.' 
-                    : 'Plyr player will automatically generate presigned URLs for Wasabi videos with modern HTML5 controls.'
+                    ? 'YouTube-like player with HLS streaming provides adaptive bitrate and modern controls for optimal playback.' 
+                    : 'YouTube-like player will automatically generate presigned URLs for Wasabi videos with modern HTML5 controls and seek functionality.'
                   }
                 </div>
               </div>
