@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import Plyr from 'plyr';
 import Hls from 'hls.js';
 import 'plyr/dist/plyr.css';
+import { generatePresignedVideoUrl, refreshPresignedUrlIfNeeded } from '@/utils/presigned-url';
 
 interface PlyrVideoPlayerProps {
   src: string;
@@ -15,6 +16,7 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
   const hlsRef = useRef<Hls | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [videoSrc, setVideoSrc] = useState<string>(src);
 
   const isValidVideoUrl = (url: string) => {
     if (!url || url.startsWith('placeholder://')) return false;
@@ -30,6 +32,19 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
     return url.includes('.m3u8') || url.includes('hls') || url.includes('master.m3u8');
   };
 
+  const handlePresignedUrl = async (url: string) => {
+    try {
+      console.log('Generating presigned URL for:', url);
+      const presignedUrl = await generatePresignedVideoUrl(url);
+      setVideoSrc(presignedUrl);
+      return presignedUrl;
+    } catch (error) {
+      console.error('Failed to generate presigned URL:', error);
+      setVideoSrc(url);
+      return url;
+    }
+  };
+
   useEffect(() => {
     setError(null);
     setIsLoading(true);
@@ -43,6 +58,37 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
     const video = videoRef.current;
     if (!video) return;
 
+    // Handle presigned URL generation for Wasabi videos
+    const initializeVideo = async () => {
+      let finalSrc = src;
+      
+      if (src.includes('wasabisys.com') && !isHLSStream(src)) {
+        finalSrc = await handlePresignedUrl(src);
+      } else {
+        setVideoSrc(src);
+      }
+
+      await initializePlayer(finalSrc);
+    };
+
+    initializeVideo();
+
+    return () => {
+      if (plyrRef.current) {
+        plyrRef.current.destroy();
+        plyrRef.current = null;
+      }
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [src]);
+
+  const initializePlayer = async (sourceUrl: string) => {
+    const video = videoRef.current;
+    if (!video) return;
+
     // Clean up previous instances
     if (plyrRef.current) {
       plyrRef.current.destroy();
@@ -52,8 +98,6 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
-
-    const initializePlayer = () => {
       // Initialize Plyr
       plyrRef.current = new Plyr(video, {
         controls: [
@@ -124,7 +168,7 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
       });
     };
 
-    if (isHLSStream(src)) {
+    if (isHLSStream(sourceUrl)) {
       // Handle HLS streams
       if (Hls.isSupported()) {
         const hls = new Hls({
@@ -141,7 +185,7 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
 
         hls.on(Hls.Events.MEDIA_ATTACHED, () => {
           console.log('HLS: Media attached');
-          hls.loadSource(src);
+          hls.loadSource(sourceUrl);
         });
 
         hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
@@ -184,9 +228,9 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
         hls.attachMedia(video);
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         // Native HLS support (Safari)
-        video.src = src;
+        video.src = sourceUrl;
         video.addEventListener('loadedmetadata', () => {
-          initializePlayer();
+          // Player already initialized above
         });
         video.addEventListener('error', () => {
           setError('Error loading HLS stream');
@@ -198,27 +242,16 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
       }
     } else {
       // Handle regular video files
-      video.src = src;
+      video.src = sourceUrl;
       video.addEventListener('loadedmetadata', () => {
-        initializePlayer();
+        // Player already initialized above
       });
       video.addEventListener('error', () => {
         setError('Error loading video');
         setIsLoading(false);
       });
     }
-
-    return () => {
-      if (plyrRef.current) {
-        plyrRef.current.destroy();
-        plyrRef.current = null;
-      }
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
-    };
-  }, [src]);
+  };
 
   if (!isValidVideoUrl(src)) {
     return (
