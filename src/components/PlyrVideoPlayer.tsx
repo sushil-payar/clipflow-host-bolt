@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import Plyr from 'plyr';
+import * as Plyr from 'plyr';
 import Hls from 'hls.js';
 import 'plyr/dist/plyr.css';
 import { generatePresignedVideoUrl, refreshPresignedUrlIfNeeded } from '@/utils/presigned-url';
@@ -130,7 +130,7 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
 
     // Initialize Plyr
     try {
-        plyrRef.current = new Plyr(video, {
+      plyrRef.current = new Plyr(video, {
         controls: [
           'play-large',
           'restart',
@@ -198,13 +198,12 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
         setIsLoading(false);
       });
 
-      } catch (plyrError) {
-        console.error('Error initializing Plyr:', plyrError);
-        setError('Failed to initialize video player');
-        setIsLoading(false);
-        return;
-      }
-    };
+    } catch (plyrError) {
+      console.error('Error initializing Plyr:', plyrError);
+      setError('Failed to initialize video player');
+      setIsLoading(false);
+      return;
+    }
 
     if (isHLSStream(sourceUrl)) {
       // Handle HLS streams
@@ -231,18 +230,8 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
           
           // Set up quality options for Plyr
           if (data.levels && data.levels.length > 0) {
-            const qualityOptions: { [key: number]: string } = {};
-            data.levels.forEach((level, index) => {
-              qualityOptions[index] = `${level.height}p`;
-            });
-            
-            // Update Plyr quality settings
-            if (plyrRef.current) {
-              plyrRef.current.quality = qualityOptions;
-            }
+            console.log('Available quality levels:', data.levels.map(level => `${level.height}p`));
           }
-          
-          initializePlayer();
         });
 
         hls.on(Hls.Events.ERROR, (event, data) => {
@@ -369,4 +358,5 @@ const PlyrVideoPlayer = ({ src, poster, className }: PlyrVideoPlayerProps) => {
     </div>
   );
 };
+
 export default PlyrVideoPlayer;

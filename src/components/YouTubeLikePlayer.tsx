@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import Plyr from 'plyr';
+import * as Plyr from 'plyr';
 import Hls from 'hls.js';
 import 'plyr/dist/plyr.css';
 import { generatePresignedVideoUrl } from '@/utils/presigned-url';
@@ -124,13 +124,7 @@ const YouTubeLikePlayer = ({ src, poster, className, title }: YouTubeLikePlayerP
           hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
             console.log('HLS manifest parsed', data);
             if (data.levels && data.levels.length > 0) {
-              const qualityOptions: { [key: number]: string } = {};
-              data.levels.forEach((level, index) => {
-                qualityOptions[index] = `${level.height}p`;
-              });
-              if (plyrRef.current) {
-                plyrRef.current.quality = qualityOptions;
-              }
+              console.log('Available quality levels:', data.levels.map(level => `${level.height}p`));
             }
           });
 
