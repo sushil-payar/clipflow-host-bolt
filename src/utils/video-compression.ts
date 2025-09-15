@@ -12,9 +12,9 @@ export const compressVideo = async (
   options: CompressionOptions = {}
 ): Promise<{ compressedFile: File; originalSize: number; compressedSize: number; compressionRatio: number }> => {
   const {
-    quality = 0.2, // 80% compression (0.2 quality means 80% size reduction)
-    maxWidth = 1920,
-    maxHeight = 1080,
+    quality = 0.15, // More aggressive compression for faster uploads
+    maxWidth = 1280, // Lower default resolution for speed
+    maxHeight = 720,
     format = 'mp4'
   } = options;
 

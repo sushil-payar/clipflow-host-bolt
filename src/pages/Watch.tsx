@@ -143,6 +143,13 @@ const Watch = () => {
               src={video.file_url}
               poster={video.thumbnail_url}
               title={video.title}
+              qualityLevels={[
+                { label: '4K', height: 2160, src: video.file_url },
+                { label: '1080p', height: 1080, src: video.file_url },
+                { label: '720p', height: 720, src: video.file_url },
+                { label: '480p', height: 480, src: video.file_url },
+                { label: '360p', height: 360, src: video.file_url }
+              ]}
             />
             
             {/* Debug Info - Remove in production */}

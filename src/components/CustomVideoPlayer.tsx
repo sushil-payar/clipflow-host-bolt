@@ -12,16 +12,24 @@ import {
   Loader2
 } from 'lucide-react';
 
+interface QualityLevel {
+  label: string;
+  height: number;
+  src: string;
+}
+
 interface CustomVideoPlayerProps {
   src: string;
   poster?: string;
   className?: string;
   title?: string;
+  qualityLevels?: QualityLevel[];
 }
 
-const CustomVideoPlayer = ({ src, poster, className, title }: CustomVideoPlayerProps) => {
+const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: CustomVideoPlayerProps) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const progressRef = useRef<HTMLDivElement | null>(null);
+  const thumbnailRef = useRef<HTMLCanvasElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -34,6 +42,10 @@ const CustomVideoPlayer = ({ src, poster, className, title }: CustomVideoPlayerP
   const [videoSrc, setVideoSrc] = useState<string>('');
   const [playbackRate, setPlaybackRate] = useState(1);
   const [showSettings, setShowSettings] = useState(false);
+  const [currentQuality, setCurrentQuality] = useState<QualityLevel | null>(null);
+  const [showThumbnail, setShowThumbnail] = useState(false);
+  const [thumbnailTime, setThumbnailTime] = useState(0);
+  const [thumbnailPosition, setThumbnailPosition] = useState({ x: 0, y: 0 });
 
   const isValidVideoUrl = (url: string) => {
     if (!url || url.startsWith('placeholder://')) return false;
@@ -54,6 +66,25 @@ const CustomVideoPlayer = ({ src, poster, className, title }: CustomVideoPlayerP
 
     const initializeVideo = async () => {
       try {
+        // Set up default quality levels if not provided
+        if (!qualityLevels) {
+          const defaultQualities: QualityLevel[] = [
+            { label: '4K', height: 2160, src },
+            { label: '1080p', height: 1080, src },
+            { label: '720p', height: 720, src },
+            { label: '480p', height: 480, src },
+            { label: '360p', height: 360, src }
+          ];
+          
+          // Set 720p as default
+          const defaultQuality = defaultQualities.find(q => q.height === 720) || defaultQualities[0];
+          setCurrentQuality(defaultQuality);
+        } else {
+          // Set 720p as default from provided qualities
+          const defaultQuality = qualityLevels.find(q => q.height === 720) || qualityLevels[0];
+          setCurrentQuality(defaultQuality);
+        }
+
         let finalSrc = src;
         
         if (src.includes('wasabisys.com')) {
@@ -71,7 +102,7 @@ const CustomVideoPlayer = ({ src, poster, className, title }: CustomVideoPlayerP
     };
 
     initializeVideo();
-  }, [src]);
+  }, [src, qualityLevels]);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
@@ -164,6 +195,86 @@ const CustomVideoPlayer = ({ src, poster, className, title }: CustomVideoPlayerP
     video.playbackRate = rate;
     setPlaybackRate(rate);
     setShowSettings(false);
+  }, []);
+
+  const changeQuality = useCallback(async (quality: QualityLevel) => {
+    const video = videoRef.current;
+    if (!video) return;
+    
+    const currentTime = video.currentTime;
+    const wasPlaying = !video.paused;
+    
+    setIsLoading(true);
+    
+    try {
+      let finalSrc = quality.src;
+      if (quality.src.includes('wasabisys.com')) {
+        finalSrc = await generatePresignedVideoUrl(quality.src);
+      }
+      
+      setVideoSrc(finalSrc);
+      setCurrentQuality(quality);
+      
+      // Wait for video to load and restore position
+      const handleLoadedData = () => {
+        video.currentTime = currentTime;
+        if (wasPlaying) {
+          video.play();
+        }
+        setIsLoading(false);
+        video.removeEventListener('loadeddata', handleLoadedData);
+      };
+      
+      video.addEventListener('loadeddata', handleLoadedData);
+    } catch (error) {
+      console.error('Error changing quality:', error);
+      setError('Failed to change video quality');
+      setIsLoading(false);
+    }
+    
+    setShowSettings(false);
+  }, []);
+
+  const generateThumbnail = useCallback((time: number) => {
+    const video = videoRef.current;
+    const canvas = thumbnailRef.current;
+    if (!video || !canvas || !duration) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Set canvas size
+    canvas.width = 160;
+    canvas.height = 90;
+
+    // Create a temporary video element for thumbnail generation
+    const thumbVideo = document.createElement('video');
+    thumbVideo.src = videoSrc;
+    thumbVideo.currentTime = time;
+    thumbVideo.muted = true;
+    
+    thumbVideo.addEventListener('seeked', () => {
+      ctx.drawImage(thumbVideo, 0, 0, 160, 90);
+    });
+  }, [videoSrc, duration]);
+
+  const handleProgressHover = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const progress = progressRef.current;
+    if (!progress || !duration) return;
+
+    const rect = progress.getBoundingClientRect();
+    const pos = (e.clientX - rect.left) / rect.width;
+    const time = pos * duration;
+    
+    setThumbnailTime(time);
+    setThumbnailPosition({ x: e.clientX - rect.left, y: rect.top - 100 });
+    setShowThumbnail(true);
+    
+    generateThumbnail(time);
+  }, [duration, generateThumbnail]);
+
+  const handleProgressLeave = useCallback(() => {
+    setShowThumbnail(false);
   }, []);
 
   const formatTime = (seconds: number) => {
@@ -298,17 +409,42 @@ const CustomVideoPlayer = ({ src, poster, className, title }: CustomVideoPlayerP
         }`}
       >
         {/* Progress Bar */}
-        <div 
-          ref={progressRef}
-          className="w-full h-2 bg-white/20 rounded-full cursor-pointer mb-4 group/progress"
-          onClick={handleSeek}
-        >
+        <div className="relative">
           <div 
-            className="h-full bg-red-500 rounded-full relative group-hover/progress:bg-red-400 transition-colors"
-            style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
+            ref={progressRef}
+            className="w-full h-2 bg-white/20 rounded-full cursor-pointer mb-4 group/progress"
+            onClick={handleSeek}
+            onMouseMove={handleProgressHover}
+            onMouseLeave={handleProgressLeave}
           >
-            <div className="absolute right-0 top-1/2 transform translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-red-500 rounded-full opacity-0 group-hover/progress:opacity-100 transition-opacity" />
+            <div 
+              className="h-full bg-red-500 rounded-full relative group-hover/progress:bg-red-400 transition-colors"
+              style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
+            >
+              <div className="absolute right-0 top-1/2 transform translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-red-500 rounded-full opacity-0 group-hover/progress:opacity-100 transition-opacity" />
+            </div>
           </div>
+
+          {/* Thumbnail Preview */}
+          {showThumbnail && (
+            <div 
+              className="absolute z-30 bg-black/90 rounded-lg p-2 pointer-events-none"
+              style={{ 
+                left: `${Math.max(10, Math.min(thumbnailPosition.x - 80, window.innerWidth - 170))}px`,
+                bottom: '60px'
+              }}
+            >
+              <canvas 
+                ref={thumbnailRef}
+                className="rounded border border-white/20"
+                width="160"
+                height="90"
+              />
+              <div className="text-white text-xs text-center mt-1">
+                {formatTime(thumbnailTime)}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-between">
@@ -356,21 +492,48 @@ const CustomVideoPlayer = ({ src, poster, className, title }: CustomVideoPlayerP
               </button>
 
               {showSettings && (
-                <div className="absolute bottom-8 right-0 bg-black/90 backdrop-blur-sm rounded-lg p-3 min-w-32">
-                  <div className="text-white text-sm font-medium mb-2">Speed</div>
-                  {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((rate) => (
-                    <button
-                      key={rate}
-                      onClick={() => changePlaybackRate(rate)}
-                      className={`block w-full text-left px-2 py-1 text-sm rounded transition-colors ${
-                        playbackRate === rate 
-                          ? 'bg-red-500 text-white' 
-                          : 'text-white hover:bg-white/10'
-                      }`}
-                    >
-                      {rate}x
-                    </button>
-                  ))}
+                <div className="absolute bottom-8 right-0 bg-black/90 backdrop-blur-sm rounded-lg p-3 min-w-40 max-h-80 overflow-y-auto">
+                  {/* Quality Settings */}
+                  <div className="mb-4">
+                    <div className="text-white text-sm font-medium mb-2">Quality</div>
+                    {(qualityLevels || [
+                      { label: '4K', height: 2160, src },
+                      { label: '1080p', height: 1080, src },
+                      { label: '720p', height: 720, src },
+                      { label: '480p', height: 480, src },
+                      { label: '360p', height: 360, src }
+                    ]).map((quality) => (
+                      <button
+                        key={quality.label}
+                        onClick={() => changeQuality(quality)}
+                        className={`block w-full text-left px-2 py-1 text-sm rounded transition-colors ${
+                          currentQuality?.label === quality.label 
+                            ? 'bg-red-500 text-white' 
+                            : 'text-white hover:bg-white/10'
+                        }`}
+                      >
+                        {quality.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Speed Settings */}
+                  <div>
+                    <div className="text-white text-sm font-medium mb-2">Speed</div>
+                    {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((rate) => (
+                      <button
+                        key={rate}
+                        onClick={() => changePlaybackRate(rate)}
+                        className={`block w-full text-left px-2 py-1 text-sm rounded transition-colors ${
+                          playbackRate === rate 
+                            ? 'bg-red-500 text-white' 
+                            : 'text-white hover:bg-white/10'
+                        }`}
+                      >
+                        {rate}x
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

@@ -11,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { uploadVideoDirectToWasabi } from "@/utils/wasabi-direct-upload";
 import { uploadAndCompressVideo } from "@/utils/compressed-upload";
 import { compressVideo, formatFileSize, formatCompressionRatio } from "@/utils/video-compression";
+import { compressVideoMultiQuality, getOptimalQualityForUpload } from "@/utils/multi-quality-compression";
 import { 
   Upload as UploadIcon, 
   FileVideo, 
@@ -82,14 +83,11 @@ const Upload = () => {
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
-
-  // Convert a File to a base64 string without using large spreads
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
         const result = reader.result as string;
-        // result is a data URL like: data:video/mp4;base64,<base64>
         const commaIndex = result.indexOf(',');
         const base64 = commaIndex >= 0 ? result.substring(commaIndex + 1) : result;
         resolve(base64);
@@ -137,7 +135,7 @@ const Upload = () => {
         return;
       }
 
-      // Upload each file with compression
+      // Upload each file with optimized compression
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const progressBase = (i / files.length) * 100;
@@ -146,115 +144,86 @@ const Upload = () => {
         setUploadProgress(progressBase + progressStep * 0.1);
 
         try {
-          // First try client-side compression
-          try {
-            console.log('Starting client-side compression...');
-            const { compressedFile, originalSize, compressedSize, compressionRatio } = await compressVideo(file, { quality: 0.2 });
-            
-            console.log(`Video compressed: ${formatFileSize(originalSize)} → ${formatFileSize(compressedSize)} (${compressionRatio.toFixed(1)}% reduction)`);
-            
-            setUploadProgress(progressBase + progressStep * 0.3);
-            
-            const result = await uploadAndCompressVideo(
-              compressedFile,
-              i === 0 ? title : `${title} (${i + 1})`,
-              description
-            );
+          // Use optimized multi-quality compression for faster uploads
+          console.log('Starting optimized multi-quality compression...');
+          const optimalQualities = getOptimalQualityForUpload(file.size);
+          
+          const compressionResult = await compressVideoMultiQuality(file, optimalQualities);
+          
+          // Use the smallest compressed version for upload to maximize speed
+          const qualityKeys = Object.keys(compressionResult.qualities);
+          const fastestQuality = qualityKeys.reduce((smallest, current) => 
+            compressionResult.qualities[current].size < compressionResult.qualities[smallest].size ? current : smallest
+          );
+          
+          const compressedFile = compressionResult.qualities[fastestQuality].file;
+          const compressionRatio = ((compressionResult.originalSize - compressedFile.size) / compressionResult.originalSize) * 100;
+          
+          console.log(`Video compressed to ${fastestQuality}: ${formatFileSize(compressionResult.originalSize)} → ${formatFileSize(compressedFile.size)} (${compressionRatio.toFixed(1)}% reduction)`);
+          
+          setUploadProgress(progressBase + progressStep * 0.3);
+          
+          const result = await uploadAndCompressVideo(
+            compressedFile,
+            i === 0 ? title : `${title} (${i + 1})`,
+            description
+          );
 
-            if (!result.success) {
-              throw new Error(result.error || 'Upload failed');
-            }
-
-            // Store compression info for the first file
-            if (i === 0) {
-              setCompressionInfo({
-                originalSize: originalSize,
-                compressedSize: compressedSize,
-                compressionRatio: compressionRatio,
-                hlsUrl: result.hlsUrl,
-                segmentCount: result.segmentCount
-              });
-            }
-
-            setUploadProgress(progressBase + progressStep);
-            
-            toast({
-              title: "Video uploaded successfully!",
-              description: `"${i === 0 ? title : `${title} (${i + 1})`}" compressed ${compressionRatio.toFixed(1)}% and uploaded`,
-              duration: 3000,
-            });
-
-          } catch (compressionError) {
-            console.error('Client-side compression failed, trying server compression:', compressionError);
-            
-            toast({
-              title: "Trying server compression",
-              description: "Client compression failed, using server-side compression...",
-              duration: 3000,
-            });
-            
-            const result = await uploadAndCompressVideo(
-              file,
-              i === 0 ? title : `${title} (${i + 1})`,
-              description
-            );
-
-            if (!result.success) {
-              console.error('Server compression also failed, trying direct upload...');
-              
-              toast({
-                title: "Trying direct upload",
-                description: "Server compression failed, using direct upload...",
-                duration: 3000,
-              });
-              
-              // Fallback to direct upload
-              setUploadProgress(progressBase + progressStep * 0.2);
-              
-              const directUploadResult = await uploadVideoDirectToWasabi(
-                file,
-                i === 0 ? title : `${title} (${i + 1})`,
-                description,
-                supabase
-              );
-
-              if (!directUploadResult.success) {
-                console.error('Direct upload also failed:', directUploadResult.error);
-                throw new Error(directUploadResult.error || 'All upload methods failed');
-              }
-
-              console.log('Direct upload successful:', directUploadResult);
-              setUploadProgress(progressBase + progressStep);
-              
-              toast({
-                title: "Video uploaded successfully!",
-                description: `"${i === 0 ? title : `${title} (${i + 1})`}" uploaded via direct method`,
-                duration: 3000,
-              });
-            } else {
-              // Store compression info for the first file
-              if (i === 0 && result.compressionRatio && result.originalSize && result.compressedSize) {
-                setCompressionInfo({
-                  originalSize: result.originalSize,
-                  compressedSize: result.compressedSize,
-                  compressionRatio: result.compressionRatio,
-                  hlsUrl: result.hlsUrl,
-                  segmentCount: result.segmentCount
-                });
-              }
-
-              setUploadProgress(progressBase + progressStep);
-              
-              toast({
-                title: "Video uploaded successfully!",
-                description: `"${i === 0 ? title : `${title} (${i + 1})`}" compressed and uploaded`,
-                duration: 3000,
-              });
-            }
+          if (!result.success) {
+            throw new Error(result.error || 'Upload failed');
           }
-        } catch (error) {
-          console.error('Upload failed for file:', file.name, error);
-          throw error;
+
+          // Store compression info for the first file
+          if (i === 0) {
+            setCompressionInfo({
+              originalSize: compressionResult.originalSize,
+              compressedSize: compressedFile.size,
+              compressionRatio: compressionRatio,
+              hlsUrl: result.hlsUrl,
+              segmentCount: result.segmentCount
+            });
+          }
+
+          setUploadProgress(progressBase + progressStep);
+          
+          toast({
+            title: "Upload complete!",
+            description: `"${i === 0 ? title : `${title} (${i + 1})`}" uploaded in ${fastestQuality} quality (${compressionRatio.toFixed(1)}% smaller)`,
+            duration: 3000,
+          });
+
+        } catch (compressionError) {
+          console.error('Optimized compression failed, trying fallback upload:', compressionError);
+          
+          toast({
+            title: "Using fallback method",
+            description: "Optimized compression failed, trying direct upload...",
+            duration: 3000,
+          });
+          
+          // Fallback to direct upload
+          setUploadProgress(progressBase + progressStep * 0.2);
+          
+          const directUploadResult = await uploadVideoDirectToWasabi(
+            file,
+            i === 0 ? title : `${title} (${i + 1})`,
+            description,
+            supabase
+          );
+
+          if (!directUploadResult.success) {
+            console.error('Direct upload also failed:', directUploadResult.error);
+            throw new Error(directUploadResult.error || 'All upload methods failed');
+          }
+
+          console.log('Direct upload successful:', directUploadResult);
+          setUploadProgress(progressBase + progressStep);
+          
+          toast({
+            title: "Video uploaded!",
+            description: `"${i === 0 ? title : `${title} (${i + 1})`}" uploaded successfully`,
+            duration: 3000,
+          });
         }
       }
 
@@ -270,11 +239,6 @@ const Upload = () => {
       
     } catch (error) {
       console.error('Upload error:', error);
-      console.error('Error details:', {
-        name: error instanceof Error ? error.name : 'Unknown',
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      });
       toast({
         title: "Upload Failed",
         description: error instanceof Error ? error.message : "Failed to upload video",
@@ -295,68 +259,73 @@ const Upload = () => {
           <div className="text-center mb-8">
             <h1 className="text-4xl font-bold mb-4">Upload Videos</h1>
             <p className="text-muted-foreground text-lg">
-              Upload your videos for HLS conversion and adaptive streaming
+              Upload your videos with optimized compression for faster uploads
             </p>
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-8">
+          <div className="grid gap-8">
             {/* Upload Area */}
-            <Card className="bg-video-surface border-video-border">
+            <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <FileVideo className="w-5 h-5" />
+                  <UploadIcon className="w-5 h-5" />
                   Select Videos
                 </CardTitle>
                 <CardDescription>
-                  Drag and drop your video files or click to browse
+                  Drag and drop videos or click to select files. Large videos will be automatically compressed for faster upload.
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div
-                  className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-300 ${
+                  className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
                     dragActive 
-                      ? 'border-video-primary bg-video-primary/10' 
-                      : 'border-video-border hover:border-video-primary/50'
+                      ? 'border-primary bg-primary/5' 
+                      : 'border-muted-foreground/25 hover:border-primary/50'
                   }`}
                   onDragEnter={handleDrag}
                   onDragLeave={handleDrag}
                   onDragOver={handleDrag}
                   onDrop={handleDrop}
                 >
-                  <UploadIcon className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-lg font-medium mb-2">
-                    Drop your videos here
-                  </p>
-                  <p className="text-muted-foreground mb-4">
-                    Supports MP4, MOV, AVI, and more
-                  </p>
-                  <Button variant="upload" onClick={() => document.getElementById('file-input')?.click()}>
-                    Browse Files
-                  </Button>
-                  <input
-                    id="file-input"
-                    type="file"
-                    multiple
-                    accept="video/*"
-                    className="hidden"
-                    onChange={handleFileSelect}
-                  />
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                      <FileVideo className="w-8 h-8 text-primary" />
+                    </div>
+                    <div>
+                      <p className="text-lg font-medium mb-2">
+                        Drop your videos here or{" "}
+                        <label className="text-primary cursor-pointer hover:underline">
+                          browse files
+                          <input
+                            type="file"
+                            multiple
+                            accept="video/*"
+                            onChange={handleFileSelect}
+                            className="hidden"
+                          />
+                        </label>
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Supports MP4, MOV, AVI, and other video formats
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
-                {/* File List */}
+                {/* Selected Files */}
                 {files.length > 0 && (
-                  <div className="mt-6 space-y-2">
-                    <h3 className="font-medium mb-3">Selected Files ({files.length})</h3>
+                  <div className="mt-6 space-y-3">
+                    <h3 className="font-medium">Selected Files ({files.length})</h3>
                     {files.map((file, index) => (
                       <div
                         key={index}
-                        className="flex items-center justify-between p-3 bg-background rounded-lg border border-video-border"
+                        className="flex items-center justify-between p-3 bg-muted rounded-lg"
                       >
                         <div className="flex items-center gap-3">
-                          <FileVideo className="w-5 h-5 text-video-primary" />
+                          <FileVideo className="w-5 h-5 text-muted-foreground" />
                           <div>
-                            <p className="font-medium truncate max-w-48">{file.name}</p>
-                            <p className="text-sm text-muted-foreground">
+                            <p className="font-medium text-sm">{file.name}</p>
+                            <p className="text-xs text-muted-foreground">
                               {formatFileSize(file.size)}
                             </p>
                           </div>
@@ -365,7 +334,7 @@ const Upload = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => removeFile(index)}
-                          className="hover:bg-destructive/10 hover:text-destructive"
+                          className="text-muted-foreground hover:text-destructive"
                         >
                           <X className="w-4 h-4" />
                         </Button>
@@ -377,149 +346,120 @@ const Upload = () => {
             </Card>
 
             {/* Video Details */}
-            <Card className="bg-video-surface border-video-border">
+            <Card>
               <CardHeader>
                 <CardTitle>Video Details</CardTitle>
                 <CardDescription>
-                  Add title and description for your videos
+                  Provide information about your video
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <Label htmlFor="title">Title</Label>
+                  <Label htmlFor="title">Title *</Label>
                   <Input
                     id="title"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    placeholder="Enter video title"
-                    className="bg-background border-video-border"
+                    placeholder="Enter video title..."
+                    required
                   />
                 </div>
-                
                 <div>
                   <Label htmlFor="description">Description</Label>
                   <Textarea
                     id="description"
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Enter video description"
+                    placeholder="Enter video description..."
                     rows={4}
-                    className="bg-background border-video-border"
                   />
                 </div>
+              </CardContent>
+            </Card>
 
-                {/* Upload Progress */}
-                {uploading && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">Uploading & Compressing...</span>
-                      <span className="text-sm text-muted-foreground">{Math.round(uploadProgress)}%</span>
-                    </div>
-                    <Progress value={uploadProgress} className="h-2" />
+            {/* Upload Progress */}
+            {uploading && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Clock className="w-5 h-5" />
+                    Upload Progress
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <Progress value={uploadProgress} className="w-full" />
+                    <p className="text-sm text-muted-foreground text-center">
+                      {uploadProgress.toFixed(0)}% complete
+                    </p>
                   </div>
-                )}
+                </CardContent>
+              </Card>
+            )}
 
-                {/* Compression Info */}
-                {compressionInfo && (
-                  <div className="space-y-2 p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
-                    <h4 className="font-medium text-green-500">HLS Conversion Results</h4>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-muted-foreground">Original Size:</span>
-                        <p className="font-medium">{formatFileSize(compressionInfo.originalSize)}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">HLS Size:</span>
-                        <p className="font-medium">{formatFileSize(compressionInfo.compressedSize)}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Space Saved:</span>
-                        <p className="font-medium text-green-500">{formatCompressionRatio(compressionInfo.compressionRatio)}</p>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Segments:</span>
-                        <p className="font-medium">{compressionInfo.segmentCount || 'N/A'}</p>
-                      </div>
+            {/* Compression Info */}
+            {compressionInfo && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5 text-green-500" />
+                    Compression Results
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Original Size</p>
+                      <p className="text-lg font-semibold">
+                        {formatFileSize(compressionInfo.originalSize)}
+                      </p>
                     </div>
-                    <div className="mt-3 p-2 bg-blue-500/10 border border-blue-500/20 rounded text-xs">
-                      <span className="text-blue-400 font-medium">✨ HLS Streaming:</span> Your video now supports adaptive bitrate streaming for instant playback on any device!
+                    <div>
+                      <p className="text-sm text-muted-foreground">Compressed Size</p>
+                      <p className="text-lg font-semibold text-green-600">
+                        {formatFileSize(compressionInfo.compressedSize)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Space Saved</p>
+                      <p className="text-lg font-semibold text-green-600">
+                        {formatCompressionRatio(compressionInfo.compressionRatio)}
+                      </p>
                     </div>
                   </div>
-                )}
-
-                <Button 
-                  className="w-full" 
-                  variant="hero"
-                  onClick={handleUpload}
-                  disabled={uploading || files.length === 0}
-                >
-                  {uploading ? (
-                    <>
-                      <Clock className="w-4 h-4 mr-2 animate-spin" />
-                      Uploading...
-                    </>
-                  ) : (
-                    <>
-                      <UploadIcon className="w-4 h-4 mr-2" />
-                      Upload Videos
-                    </>
+                  {compressionInfo.hlsUrl && (
+                    <div className="mt-4 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                      <p className="text-sm text-green-700 dark:text-green-300">
+                        ✓ Video successfully converted to HLS with {compressionInfo.segmentCount} segments
+                      </p>
+                    </div>
                   )}
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
+                </CardContent>
+              </Card>
+            )}
 
-          {/* Info Cards */}
-          <div className="grid md:grid-cols-3 gap-4 mt-8">
-            <Card className="bg-video-surface border-video-border">
-              <CardContent className="p-4 text-center">
-                <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-2" />
-                <h3 className="font-medium mb-1">HLS Streaming</h3>
-                <p className="text-sm text-muted-foreground">
-                  Adaptive bitrate streaming for instant playback
-                </p>
-              </CardContent>
-            </Card>
-            
-            <Card className="bg-video-surface border-video-border">
-              <CardContent className="p-4 text-center">
-                <AlertCircle className="w-8 h-8 text-video-primary mx-auto mb-2" />
-                <h3 className="font-medium mb-1">Cloud Storage</h3>
-                <p className="text-sm text-muted-foreground">
-                  Secure storage on Wasabi cloud
-                </p>
-              </CardContent>
-            </Card>
-            
-            <Card className="bg-video-surface border-video-border">
-              <CardContent className="p-4 text-center">
-                <Clock className="w-8 h-8 text-blue-500 mx-auto mb-2" />
-                <h3 className="font-medium mb-1">Fast Processing</h3>
-                <p className="text-sm text-muted-foreground">
-                  Quick compression and upload
-                </p>
-              </CardContent>
-            </Card>
+            {/* Upload Button */}
+            <div className="flex justify-center">
+              <Button
+                onClick={handleUpload}
+                disabled={files.length === 0 || uploading || !title.trim()}
+                size="lg"
+                className="min-w-40"
+              >
+                {uploading ? (
+                  <>
+                    <Clock className="w-4 h-4 mr-2 animate-spin" />
+                    Uploading...
+                  </>
+                ) : (
+                  <>
+                    <UploadIcon className="w-4 h-4 mr-2" />
+                    Upload Videos
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
-
-          {/* Upload Status Notice */}
-          <Card className="mt-8 bg-green-500/10 border-green-500/20">
-            <CardContent className="p-6">
-              <div className="flex items-start gap-3">
-                <CheckCircle className="w-6 h-6 text-green-500 flex-shrink-0 mt-1" />
-                <div>
-                  <h3 className="font-medium text-green-500 mb-2">HLS Streaming Ready</h3>
-                  <p className="text-sm text-muted-foreground mb-3">
-                    Videos are automatically converted to HLS format with multiple bitrates for adaptive streaming. 
-                    The system uses FFmpeg to create optimized segments for instant playback on any device.
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Your HLS videos will start playing immediately with adaptive quality based on network conditions.
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         </div>
       </div>
     </div>
