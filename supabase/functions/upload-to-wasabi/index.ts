@@ -33,31 +33,30 @@ async function convertToHLS(file: File): Promise<{
     // Write input file
     await Deno.writeFile(tempInputPath, inputData)
     
-    // Run FFmpeg HLS conversion command with multiple bitrates
+    // Run FFmpeg HLS conversion command with multiple bitrates and 80% compression
     const command = new Deno.Command('ffmpeg', {
       args: [
         '-i', tempInputPath,
         '-c:v', 'libx264',
         '-c:a', 'aac',
-        '-b:a', '128k',
-        '-preset', 'fast',
-        '-hls_time', '10', // 10 second segments
+        '-b:a', '96k', // Reduced audio bitrate for compression
+        '-preset', 'medium', // Better compression than 'fast'
+        '-crf', '28', // 80% compression - higher CRF = more compression
+        '-hls_time', '6', // Smaller segments for instant seeking
         '-hls_list_size', '0', // Keep all segments in playlist
-        '-hls_segment_filename', `${hlsOutputDir}/segment_%03d.ts`,
+        '-hls_segment_filename', `${hlsOutputDir}/segment_%v_%03d.ts`,
         '-f', 'hls',
         '-master_pl_name', 'master.m3u8',
-        '-var_stream_map', 'v:0,a:0 v:0,a:0 v:0,a:0', // 3 different bitrates
-        '-map', '0:v:0',
-        '-map', '0:a:0',
-        '-map', '0:v:0',
-        '-map', '0:a:0',
-        '-map', '0:v:0',
-        '-map', '0:a:0',
-        '-b:v:0', '1000k', // 1Mbps
-        '-b:v:1', '500k',  // 500kbps
-        '-b:v:2', '250k',  // 250kbps
-        '-s:v:1', '854x480', // 480p for medium quality
-        '-s:v:2', '640x360', // 360p for low quality
+        '-var_stream_map', 'v:0,a:0 v:1,a:1 v:2,a:2', // 3 different bitrates
+        '-map', '0:v:0', '-map', '0:a:0', // 1080p stream
+        '-map', '0:v:0', '-map', '0:a:0', // 720p stream  
+        '-map', '0:v:0', '-map', '0:a:0', // 480p stream
+        '-b:v:0', '2500k', '-s:v:0', '1920x1080', '-maxrate:v:0', '2750k', '-bufsize:v:0', '5000k',
+        '-b:v:1', '1500k', '-s:v:1', '1280x720', '-maxrate:v:1', '1650k', '-bufsize:v:1', '3000k',
+        '-b:v:2', '800k', '-s:v:2', '854x480', '-maxrate:v:2', '880k', '-bufsize:v:2', '1600k',
+        '-b:a:0', '128k', '-b:a:1', '96k', '-b:a:2', '64k',
+        '-hls_playlist_type', 'vod',
+        '-hls_flags', 'independent_segments',
         '-y', // Overwrite output files
         masterPlaylistPath
       ],

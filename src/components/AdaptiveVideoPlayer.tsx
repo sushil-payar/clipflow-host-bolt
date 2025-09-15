@@ -10,27 +10,21 @@ import {
   Settings, 
   SkipBack, 
   SkipForward,
-  Loader2
+  Loader2,
+  Minimize
 } from 'lucide-react';
 
-interface QualityLevel {
-  label: string;
-  height: number;
-  src: string;
-}
-
-interface CustomVideoPlayerProps {
+interface AdaptiveVideoPlayerProps {
   src: string;
   poster?: string;
   className?: string;
   title?: string;
-  qualityLevels?: QualityLevel[];
 }
 
-const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: CustomVideoPlayerProps) => {
+const AdaptiveVideoPlayer = ({ src, poster, className, title }: AdaptiveVideoPlayerProps) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const progressRef = useRef<HTMLDivElement | null>(null);
-  const thumbnailRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -44,12 +38,9 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
   const [videoSrc, setVideoSrc] = useState<string>('');
   const [playbackRate, setPlaybackRate] = useState(1);
   const [showSettings, setShowSettings] = useState(false);
-  const [currentQuality, setCurrentQuality] = useState<QualityLevel | null>(null);
-  const [showThumbnail, setShowThumbnail] = useState(false);
-  const [thumbnailTime, setThumbnailTime] = useState(0);
-  const [thumbnailPosition, setThumbnailPosition] = useState({ x: 0, y: 0 });
   const [hlsLevels, setHlsLevels] = useState<any[]>([]);
-  const [isAdaptive, setIsAdaptive] = useState(false);
+  const [currentLevel, setCurrentLevel] = useState(-1);
+  const [buffered, setBuffered] = useState(0);
 
   const isValidVideoUrl = (url: string) => {
     if (!url || url.startsWith('placeholder://')) return false;
@@ -64,6 +55,77 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
   const isHLSStream = (url: string): boolean => {
     return url.includes('.m3u8') || url.includes('hls') || url.includes('master.m3u8');
   };
+
+  const initializeHLS = useCallback((sourceUrl: string) => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Clean up previous HLS instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        backBufferLength: 90,
+        maxBufferLength: 30,
+        maxBufferSize: 60 * 1000 * 1000,
+        maxBufferHole: 0.1,
+        startLevel: -1, // Auto quality
+        abrEwmaDefaultEstimate: 1000000, // Start with 1Mbps estimate
+        abrBandWidthFactor: 0.95,
+        abrBandWidthUpFactor: 0.7,
+      });
+
+      hlsRef.current = hls;
+
+      hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+        console.log('HLS: Media attached');
+        hls.loadSource(sourceUrl);
+      });
+
+      hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
+        console.log('HLS: Manifest parsed', data);
+        setHlsLevels(data.levels);
+        setIsLoading(false);
+      });
+
+      hls.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
+        setCurrentLevel(data.level);
+      });
+
+      hls.on(Hls.Events.ERROR, (event, data) => {
+        console.error('HLS Error:', data);
+        if (data.fatal) {
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              console.log('Network error, trying to recover...');
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              console.log('Media error, trying to recover...');
+              hls.recoverMediaError();
+              break;
+            default:
+              setError('Fatal error in adaptive stream');
+              break;
+          }
+        }
+      });
+
+      hls.attachMedia(video);
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native HLS support (Safari)
+      video.src = sourceUrl;
+      setIsLoading(false);
+    } else {
+      setError('Adaptive streaming not supported in this browser');
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isValidVideoUrl(src)) {
@@ -84,28 +146,10 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
         
         setVideoSrc(finalSrc);
         
-        // Initialize HLS or standard video
         if (isHLSStream(finalSrc)) {
-          setIsAdaptive(true);
           initializeHLS(finalSrc);
         } else {
-          setIsAdaptive(false);
-          // Set up default quality levels for non-HLS
-          if (!qualityLevels) {
-            const defaultQualities: QualityLevel[] = [
-              { label: '4K', height: 2160, src: finalSrc },
-              { label: '1080p', height: 1080, src: finalSrc },
-              { label: '720p', height: 720, src: finalSrc },
-              { label: '480p', height: 480, src: finalSrc },
-              { label: '360p', height: 360, src: finalSrc }
-            ];
-            
-            const defaultQuality = defaultQualities.find(q => q.height === 720) || defaultQualities[0];
-            setCurrentQuality(defaultQuality);
-          } else {
-            const defaultQuality = qualityLevels.find(q => q.height === 720) || qualityLevels[0];
-            setCurrentQuality(defaultQuality);
-          }
+          setIsLoading(false);
         }
       } catch (error) {
         console.error('Error setting up video:', error);
@@ -115,69 +159,7 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
     };
 
     initializeVideo();
-  }, [src, qualityLevels]);
-
-  const initializeHLS = useCallback((sourceUrl: string) => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    // Clean up previous HLS instance
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-
-    if (Hls.isSupported()) {
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true,
-        backBufferLength: 90,
-        maxBufferLength: 30,
-        maxBufferSize: 60 * 1000 * 1000,
-        maxBufferHole: 0.5,
-        startLevel: 1, // Start with medium quality (720p equivalent)
-      });
-
-      hlsRef.current = hls;
-
-      hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-        console.log('HLS: Media attached');
-        hls.loadSource(sourceUrl);
-      });
-
-      hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
-        console.log('HLS: Manifest parsed', data);
-        setHlsLevels(data.levels);
-        setIsLoading(false);
-      });
-
-      hls.on(Hls.Events.ERROR, (event, data) => {
-        console.error('HLS Error:', data);
-        if (data.fatal) {
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              setError('Network error loading adaptive stream');
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              setError('Media error in adaptive stream');
-              break;
-            default:
-              setError('Fatal error in adaptive stream');
-              break;
-          }
-        }
-      });
-
-      hls.attachMedia(video);
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Native HLS support (Safari)
-      video.src = sourceUrl;
-      setIsLoading(false);
-    } else {
-      setError('Adaptive streaming not supported in this browser');
-      setIsLoading(false);
-    }
-  }, []);
+  }, [src, initializeHLS]);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
@@ -193,7 +175,14 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
   const handleTimeUpdate = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
+    
     setCurrentTime(video.currentTime);
+    
+    // Update buffered progress
+    if (video.buffered.length > 0) {
+      const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+      setBuffered((bufferedEnd / video.duration) * 100);
+    }
   }, []);
 
   const handleLoadedMetadata = useCallback(() => {
@@ -249,12 +238,12 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
   }, [duration]);
 
   const toggleFullscreen = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
+    const container = containerRef.current;
+    if (!container) return;
 
     if (!isFullscreen) {
-      if (video.requestFullscreen) {
-        video.requestFullscreen();
+      if (container.requestFullscreen) {
+        container.requestFullscreen();
       }
     } else {
       if (document.exitFullscreen) {
@@ -272,93 +261,12 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
     setShowSettings(false);
   }, []);
 
-  const changeQuality = useCallback(async (quality: QualityLevel | number) => {
-    const video = videoRef.current;
-    if (!video) return;
-    
-    if (isAdaptive && hlsRef.current && typeof quality === 'number') {
-      // HLS quality change
-      hlsRef.current.currentLevel = quality;
-      setShowSettings(false);
-      return;
+  const changeQuality = useCallback((level: number) => {
+    if (hlsRef.current) {
+      hlsRef.current.currentLevel = level;
+      setCurrentLevel(level);
     }
-    
-    if (typeof quality === 'object') {
-      // Manual quality change for non-HLS
-      const currentTime = video.currentTime;
-      const wasPlaying = !video.paused;
-      
-      setIsLoading(true);
-      
-      try {
-        let finalSrc = quality.src;
-        if (quality.src.includes('wasabisys.com')) {
-          finalSrc = await generatePresignedVideoUrl(quality.src);
-        }
-        
-        setVideoSrc(finalSrc);
-        setCurrentQuality(quality);
-        
-        const handleLoadedData = () => {
-          video.currentTime = currentTime;
-          if (wasPlaying) {
-            video.play();
-          }
-          setIsLoading(false);
-          video.removeEventListener('loadeddata', handleLoadedData);
-        };
-        
-        video.addEventListener('loadeddata', handleLoadedData);
-      } catch (error) {
-        console.error('Error changing quality:', error);
-        setError('Failed to change video quality');
-        setIsLoading(false);
-      }
-    }
-    
     setShowSettings(false);
-  }, [isAdaptive]);
-
-  const generateThumbnail = useCallback((time: number) => {
-    const video = videoRef.current;
-    const canvas = thumbnailRef.current;
-    if (!video || !canvas || !duration) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Set canvas size
-    canvas.width = 160;
-    canvas.height = 90;
-
-    // Create a temporary video element for thumbnail generation
-    const thumbVideo = document.createElement('video');
-    thumbVideo.src = videoSrc;
-    thumbVideo.currentTime = time;
-    thumbVideo.muted = true;
-    
-    thumbVideo.addEventListener('seeked', () => {
-      ctx.drawImage(thumbVideo, 0, 0, 160, 90);
-    });
-  }, [videoSrc, duration]);
-
-  const handleProgressHover = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const progress = progressRef.current;
-    if (!progress || !duration) return;
-
-    const rect = progress.getBoundingClientRect();
-    const pos = (e.clientX - rect.left) / rect.width;
-    const time = pos * duration;
-    
-    setThumbnailTime(time);
-    setThumbnailPosition({ x: e.clientX - rect.left, y: rect.top - 100 });
-    setShowThumbnail(true);
-    
-    generateThumbnail(time);
-  }, [duration, generateThumbnail]);
-
-  const handleProgressLeave = useCallback(() => {
-    setShowThumbnail(false);
   }, []);
 
   const formatTime = (seconds: number) => {
@@ -380,7 +288,6 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      // Clean up HLS instance
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -395,7 +302,7 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
       clearTimeout(timeout);
       setShowControls(true);
       timeout = setTimeout(() => {
-        if (isPlaying) setShowControls(false);
+        if (isPlaying && !showSettings) setShowControls(false);
       }, 3000);
     };
 
@@ -406,7 +313,7 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
     }
 
     return () => clearTimeout(timeout);
-  }, [isPlaying]);
+  }, [isPlaying, showSettings]);
 
   if (!isValidVideoUrl(src)) {
     return (
@@ -417,7 +324,7 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
               <Play className="w-8 h-8 text-red-500" />
             </div>
             <h3 className="text-lg font-semibold text-white mb-2">Video Not Available</h3>
-            <p className="text-gray-400 text-sm">This video is still being processed or unavailable.</p>
+            <p className="text-gray-400 text-sm">This video is not accessible or still being processed.</p>
           </div>
         </div>
       </div>
@@ -436,7 +343,7 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
             <p className="text-gray-400 text-sm mb-4">{error}</p>
             <button 
               onClick={() => window.location.reload()}
-              className="px-4 py-2 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30"
+              className="px-4 py-2 rounded bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 transition-colors"
             >
               Retry
             </button>
@@ -448,10 +355,11 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
 
   return (
     <div 
+      ref={containerRef}
       className={`relative bg-black rounded-lg overflow-hidden shadow-2xl group ${className}`} 
       style={{ aspectRatio: '16/9' }}
       onMouseMove={() => setShowControls(true)}
-      onMouseLeave={() => isPlaying && setShowControls(false)}
+      onMouseLeave={() => isPlaying && !showSettings && setShowControls(false)}
     >
       {title && (
         <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/70 to-transparent p-4">
@@ -462,7 +370,7 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
       {videoSrc && (
         <video
           ref={videoRef}
-          src={videoSrc}
+          src={!isHLSStream(videoSrc) ? videoSrc : undefined}
           poster={poster}
           className="w-full h-full object-cover"
           onTimeUpdate={handleTimeUpdate}
@@ -472,12 +380,18 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
           onError={() => setError('Video playback error')}
           preload="metadata"
           crossOrigin="anonymous"
+          playsInline
         />
       )}
 
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-          <Loader2 className="w-12 h-12 text-white animate-spin" />
+          <div className="text-center">
+            <Loader2 className="w-12 h-12 text-white animate-spin mx-auto mb-4" />
+            <p className="text-white text-sm">
+              {isHLSStream(videoSrc) ? 'Loading adaptive stream...' : 'Loading video...'}
+            </p>
+          </div>
         </div>
       )}
 
@@ -487,56 +401,40 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
         onClick={togglePlay}
       >
         {!isPlaying && !isLoading && (
-          <div className="w-20 h-20 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center hover:bg-white/30 transition-all">
+          <div className="w-20 h-20 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center hover:bg-white/30 transition-all duration-200">
             <Play className="w-10 h-10 text-white ml-1" />
           </div>
         )}
       </div>
 
-        {/* Controls */}
-        <div 
-          className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent transition-opacity duration-300 ${
-            showControls ? 'opacity-100' : 'opacity-0'
-          }`}
-        >
-          {/* Progress Bar */}
-          <div className="px-4 pb-2">
+      {/* Controls */}
+      <div 
+        className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent transition-opacity duration-300 ${
+          showControls ? 'opacity-100' : 'opacity-0'
+        }`}
+        style={{ paddingTop: '60px' }}
+      >
+        {/* Progress Bar */}
+        <div className="px-4 pb-4">
+          <div 
+            ref={progressRef}
+            className="w-full h-1 bg-white/30 rounded-full cursor-pointer group/progress hover:h-2 transition-all duration-200"
+            onClick={handleSeek}
+          >
+            {/* Buffered Progress */}
             <div 
-              ref={progressRef}
-              className="w-full h-1 bg-white/30 rounded-full cursor-pointer group/progress hover:h-2 transition-all duration-200"
-              onClick={handleSeek}
-              onMouseMove={handleProgressHover}
-              onMouseLeave={handleProgressLeave}
+              className="absolute h-full bg-white/50 rounded-full"
+              style={{ width: `${buffered}%` }}
+            />
+            {/* Current Progress */}
+            <div 
+              className="h-full bg-red-500 rounded-full relative group-hover/progress:bg-red-400 transition-colors"
+              style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
             >
-              <div 
-                className="h-full bg-red-500 rounded-full relative group-hover/progress:bg-red-400 transition-colors"
-                style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
-              >
-                <div className="absolute right-0 top-1/2 transform translate-x-1/2 -translate-y-1/2 w-3 h-3 bg-red-500 rounded-full opacity-0 group-hover/progress:opacity-100 transition-all duration-200" />
-              </div>
+              <div className="absolute right-0 top-1/2 transform translate-x-1/2 -translate-y-1/2 w-3 h-3 bg-red-500 rounded-full opacity-0 group-hover/progress:opacity-100 transition-all duration-200" />
             </div>
-
-            {/* Thumbnail Preview */}
-            {showThumbnail && (
-              <div 
-                className="absolute z-30 bg-black/90 rounded-lg p-2 pointer-events-none"
-                style={{ 
-                  left: `${Math.max(10, Math.min(thumbnailPosition.x - 80, window.innerWidth - 170))}px`,
-                  bottom: '60px'
-                }}
-              >
-                <canvas 
-                  ref={thumbnailRef}
-                  className="rounded border border-white/20"
-                  width="160"
-                  height="90"
-                />
-                <div className="text-white text-xs text-center mt-1">
-                  {formatTime(thumbnailTime)}
-                </div>
-              </div>
-            )}
           </div>
+        </div>
 
         <div className="flex items-center justify-between px-4 pb-4">
           <div className="flex items-center space-x-4">
@@ -572,9 +470,9 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
               {formatTime(currentTime)} / {formatTime(duration)}
             </span>
             
-            {isAdaptive && hlsLevels.length > 0 && (
+            {isHLSStream(videoSrc) && currentLevel >= 0 && hlsLevels[currentLevel] && (
               <span className="text-red-400 text-xs font-medium">
-                AUTO
+                AUTO {hlsLevels[currentLevel].height}p
               </span>
             )}
           </div>
@@ -583,84 +481,60 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
             <div className="relative">
               <button
                 onClick={() => setShowSettings(!showSettings)}
-                className="text-white hover:text-gray-300 transition-colors"
+                className="text-white hover:text-red-400 transition-colors"
               >
                 <Settings className="w-5 h-5" />
               </button>
 
               {showSettings && (
-                <div className="absolute bottom-8 right-0 bg-black/90 backdrop-blur-sm rounded-lg p-3 min-w-40 max-h-80 overflow-y-auto">
+                <div className="absolute bottom-8 right-0 bg-black/95 backdrop-blur-md rounded-lg p-3 min-w-48 max-h-80 overflow-y-auto border border-white/20">
                   {/* Quality Settings */}
-                  <div className="mb-4">
-                    <div className="text-white text-sm font-medium mb-2">Quality</div>
-                    {isAdaptive ? (
-                      // HLS adaptive quality levels
-                      <>
+                  {isHLSStream(videoSrc) && hlsLevels.length > 0 && (
+                    <div className="mb-4">
+                      <div className="text-white text-sm font-medium mb-2">Quality</div>
+                      <div
+                        className={`px-3 py-2 text-sm cursor-pointer hover:bg-white/10 rounded transition-colors ${
+                          currentLevel === -1 ? 'bg-red-500/20 text-red-400' : 'text-white'
+                        }`}
+                        onClick={() => changeQuality(-1)}
+                      >
+                        🎯 Auto (Recommended)
+                      </div>
+                      {hlsLevels.map((level, index) => (
                         <div
-                          className={`px-3 py-2 text-sm cursor-pointer hover:bg-white/10 rounded ${
-                            hlsRef.current?.currentLevel === -1 ? 'bg-red-500/20 text-red-400' : 'text-white'
+                          key={index}
+                          className={`px-3 py-2 text-sm cursor-pointer hover:bg-white/10 rounded transition-colors ${
+                            currentLevel === index ? 'bg-red-500/20 text-red-400' : 'text-white'
                           }`}
-                          onClick={() => hlsRef.current && (hlsRef.current.currentLevel = -1)}
+                          onClick={() => changeQuality(index)}
                         >
-                          Auto (Adaptive)
+                          {level.height}p ({Math.round(level.bitrate / 1000)}k)
                         </div>
-                        {hlsLevels.map((level, index) => (
-                          <div
-                            key={index}
-                            className={`px-3 py-2 text-sm cursor-pointer hover:bg-white/10 rounded ${
-                              hlsRef.current?.currentLevel === index ? 'bg-red-500/20 text-red-400' : 'text-white'
-                            }`}
-                            onClick={() => changeQuality(index)}
-                          >
-                            {level.height}p ({Math.round(level.bitrate / 1000)}k)
-                          </div>
-                        ))}
-                      </>
-                    ) : (
-                      // Manual quality levels for non-HLS
-                      (qualityLevels || [
-                        { label: '4K', height: 2160, src },
-                        { label: '1080p', height: 1080, src },
-                        { label: '720p', height: 720, src },
-                        { label: '480p', height: 480, src },
-                        { label: '360p', height: 360, src }
-                      ]).map((quality) => (
-                        <div
-                          key={quality.label}
-                          className={`px-3 py-2 text-sm cursor-pointer hover:bg-white/10 rounded ${
-                            currentQuality?.label === quality.label ? 'bg-red-500/20 text-red-400' : 'text-white'
-                          }`}
-                          onClick={() => changeQuality(quality)}
-                        >
-                          {quality.label}
-                        </div>
-                      ))
-                    )}
-                  </div>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Speed Settings */}
                   <div>
                     <div className="text-white text-sm font-medium mb-2">Speed</div>
                     {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((rate) => (
-                      <button
+                      <div
                         key={rate}
-                        onClick={() => changePlaybackRate(rate)}
-                        className={`block w-full text-left px-2 py-1 text-sm rounded transition-colors ${
-                          playbackRate === rate 
-                            ? 'bg-red-500 text-white' 
-                            : 'text-white hover:bg-white/10'
+                        className={`px-3 py-2 text-sm cursor-pointer hover:bg-white/10 rounded transition-colors ${
+                          playbackRate === rate ? 'bg-red-500/20 text-red-400' : 'text-white'
                         }`}
+                        onClick={() => changePlaybackRate(rate)}
                       >
-                        {rate}x
-                      </button>
+                        {rate === 1 ? 'Normal' : `${rate}x`}
+                      </div>
                     ))}
                   </div>
                 </div>
               )}
             </div>
 
-            <button onClick={toggleFullscreen} className="text-white hover:text-gray-300 transition-colors">
-              <Maximize className="w-5 h-5" />
+            <button onClick={toggleFullscreen} className="text-white hover:text-red-400 transition-colors">
+              {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
             </button>
           </div>
         </div>
@@ -669,4 +543,4 @@ const CustomVideoPlayer = ({ src, poster, className, title, qualityLevels }: Cus
   );
 };
 
-export default CustomVideoPlayer;
+export default AdaptiveVideoPlayer;
