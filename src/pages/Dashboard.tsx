@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import Navigation from "@/components/Navigation";
-import VideoPlayer from "@/components/VideoPlayer";
+import MultiResolutionVideoPlayer from "@/components/MultiResolutionVideoPlayer";
 import { supabase } from "@/integrations/supabase/client";
 import { 
   Play, 
@@ -20,7 +20,9 @@ import {
   FileVideo,
   Users,
   TrendingUp,
-  Clock
+  Clock,
+  Monitor,
+  Zap
 } from "lucide-react";
 
 const Dashboard = () => {
@@ -291,8 +293,13 @@ const Dashboard = () => {
                         
                         <div className="flex items-center gap-2 mb-3">
                           {getStatusBadge(video.status)}
-                          <span className="text-xs text-muted-foreground">
-                            Compressed {video.compression_ratio}%
+                          <span className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Monitor className="w-3 h-3" />
+                            Multi-Res HLS
+                          </span>
+                          <span className="text-xs text-green-500 flex items-center gap-1">
+                            <Zap className="w-3 h-3" />
+                            {video.compression_ratio ? `${video.compression_ratio.toFixed(1)}% saved` : 'Optimized'}
                           </span>
                         </div>
                         

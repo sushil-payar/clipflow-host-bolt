@@ -4,21 +4,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import Navigation from "@/components/Navigation";
-import { supabase } from "@/integrations/supabase/client";
-import { uploadVideoDirectToWasabi } from "@/utils/wasabi-direct-upload";
-import { uploadAndCompressVideo } from "@/utils/compressed-upload";
-import { compressVideo, formatFileSize, formatCompressionRatio } from "@/utils/video-compression";
-import { compressVideoMultiQuality, getOptimalQualityForUpload } from "@/utils/multi-quality-compression";
+import EnhancedUploadProgressComponent from "@/components/EnhancedUploadProgress";
+import { uploadVideoWithMultiResolution, EnhancedUploadProgress } from "@/utils/enhanced-upload";
+import { formatFileSize } from "@/utils/video-compression";
 import { 
   Upload as UploadIcon, 
   FileVideo, 
   X, 
-  CheckCircle,
-  AlertCircle,
-  Clock
+  Zap,
+  Monitor,
+  Globe
 } from "lucide-react";
 
 const Upload = () => {
@@ -26,16 +23,10 @@ const Upload = () => {
   const [dragActive, setDragActive] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadProgress, setUploadProgress] = useState<EnhancedUploadProgress | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [compressionInfo, setCompressionInfo] = useState<{
-    originalSize: number;
-    compressedSize: number;
-    compressionRatio: number;
-    hlsUrl?: string;
-    segmentCount?: number;
-  } | null>(null);
+  const [uploadResults, setUploadResults] = useState<any[]>([]);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -118,124 +109,45 @@ const Upload = () => {
 
     try {
       setUploading(true);
-      setUploadProgress(0);
-      setCompressionInfo(null);
-
-      // Check if user is authenticated
-      const { data: { user } } = await supabase.auth.getUser();
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!user || !session) {
-        toast({
-          title: "Authentication Required",
-          description: "Please sign in to upload videos.",
-          variant: "destructive",
-        });
-        setUploading(false);
-        return;
-      }
+      setUploadProgress(null);
+      setUploadResults([]);
 
       // Upload each file with optimized compression
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const progressBase = (i / files.length) * 100;
-        const progressStep = 100 / files.length;
         
-        setUploadProgress(progressBase + progressStep * 0.1);
-
-        try {
-          // Use optimized multi-quality compression for faster uploads
-          console.log('Starting optimized multi-quality compression...');
-          const optimalQualities = getOptimalQualityForUpload(file.size);
-          
-          const compressionResult = await compressVideoMultiQuality(file, optimalQualities);
-          
-          // Use the smallest compressed version for upload to maximize speed
-          const qualityKeys = Object.keys(compressionResult.qualities);
-          const fastestQuality = qualityKeys.reduce((smallest, current) => 
-            compressionResult.qualities[current].size < compressionResult.qualities[smallest].size ? current : smallest
-          );
-          
-          const compressedFile = compressionResult.qualities[fastestQuality].file;
-          const compressionRatio = ((compressionResult.originalSize - compressedFile.size) / compressionResult.originalSize) * 100;
-          
-          console.log(`Video compressed to ${fastestQuality}: ${formatFileSize(compressionResult.originalSize)} → ${formatFileSize(compressedFile.size)} (${compressionRatio.toFixed(1)}% reduction)`);
-          
-          setUploadProgress(progressBase + progressStep * 0.3);
-          
-          const result = await uploadAndCompressVideo(
-            compressedFile,
-            i === 0 ? title : `${title} (${i + 1})`,
-            description
-          );
-
-          if (!result.success) {
-            throw new Error(result.error || 'Upload failed');
+        const result = await uploadVideoWithMultiResolution(
+          file,
+          i === 0 ? title : `${title} (${i + 1})`,
+          description,
+          (progress) => {
+            setUploadProgress(progress);
           }
+        );
 
-          // Store compression info for the first file
-          if (i === 0) {
-            setCompressionInfo({
-              originalSize: compressionResult.originalSize,
-              compressedSize: compressedFile.size,
-              compressionRatio: compressionRatio,
-              hlsUrl: result.hlsUrl,
-              segmentCount: result.segmentCount
-            });
-          }
-
-          setUploadProgress(progressBase + progressStep);
-          
-          toast({
-            title: "Upload complete!",
-            description: `"${i === 0 ? title : `${title} (${i + 1})`}" uploaded in ${fastestQuality} quality (${compressionRatio.toFixed(1)}% smaller)`,
-            duration: 3000,
-          });
-
-        } catch (compressionError) {
-          console.error('Optimized compression failed, trying fallback upload:', compressionError);
-          
-          toast({
-            title: "Using fallback method",
-            description: "Optimized compression failed, trying direct upload...",
-            duration: 3000,
-          });
-          
-          // Fallback to direct upload
-          setUploadProgress(progressBase + progressStep * 0.2);
-          
-          const directUploadResult = await uploadVideoDirectToWasabi(
-            file,
-            i === 0 ? title : `${title} (${i + 1})`,
-            description,
-            supabase
-          );
-
-          if (!directUploadResult.success) {
-            console.error('Direct upload also failed:', directUploadResult.error);
-            throw new Error(directUploadResult.error || 'All upload methods failed');
-          }
-
-          console.log('Direct upload successful:', directUploadResult);
-          setUploadProgress(progressBase + progressStep);
-          
-          toast({
-            title: "Video uploaded!",
-            description: `"${i === 0 ? title : `${title} (${i + 1})`}" uploaded successfully`,
-            duration: 3000,
-          });
+        if (!result.success) {
+          throw new Error(result.error || 'Upload failed');
         }
+
+        setUploadResults(prev => [...prev, result]);
+        
+        toast({
+          title: "Upload complete!",
+          description: `"${i === 0 ? title : `${title} (${i + 1})`}" transcoded to multiple resolutions`,
+          duration: 3000,
+        });
       }
 
       toast({
         title: "Success!",
-        description: `${files.length} video(s) uploaded successfully!`,
+        description: `${files.length} video(s) uploaded with multi-resolution support!`,
       });
       
       // Reset form
       setFiles([]);
       setTitle("");
       setDescription("");
+      setUploadResults([]);
       
     } catch (error) {
       console.error('Upload error:', error);
@@ -246,7 +158,7 @@ const Upload = () => {
       });
     } finally {
       setUploading(false);
-      setUploadProgress(0);
+      setUploadProgress(null);
     }
   };
 
@@ -269,10 +181,10 @@ const Upload = () => {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <UploadIcon className="w-5 h-5" />
-                  Select Videos
+                  Upload & Transcode Videos
                 </CardTitle>
                 <CardDescription>
-                  Drag and drop videos or click to select files. Large videos will be automatically compressed for faster upload.
+                  Upload videos with automatic transcoding to multiple resolutions (240p, 360p, 480p, 720p, 1080p) for instant playback anywhere.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -306,8 +218,27 @@ const Upload = () => {
                         </label>
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        Supports MP4, MOV, AVI, and other video formats
+                        Supports MP4, MOV, AVI, and other video formats. Auto-transcoded to 5 resolutions.
                       </p>
+                    </div>
+                    
+                    {/* Feature highlights */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6 text-center">
+                      <div className="flex flex-col items-center gap-2">
+                        <Zap className="w-6 h-6 text-blue-500" />
+                        <span className="text-sm font-medium">Lightning Fast</span>
+                        <span className="text-xs text-muted-foreground">Real-time upload speed monitoring</span>
+                      </div>
+                      <div className="flex flex-col items-center gap-2">
+                        <Monitor className="w-6 h-6 text-green-500" />
+                        <span className="text-sm font-medium">Multi-Resolution</span>
+                        <span className="text-xs text-muted-foreground">240p to 1080p automatic transcoding</span>
+                      </div>
+                      <div className="flex flex-col items-center gap-2">
+                        <Globe className="w-6 h-6 text-purple-500" />
+                        <span className="text-sm font-medium">Instant Playback</span>
+                        <span className="text-xs text-muted-foreground">HLS streaming for global access</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -378,61 +309,59 @@ const Upload = () => {
             </Card>
 
             {/* Upload Progress */}
-            {uploading && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Clock className="w-5 h-5" />
-                    Upload Progress
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <Progress value={uploadProgress} className="w-full" />
-                    <p className="text-sm text-muted-foreground text-center">
-                      {uploadProgress.toFixed(0)}% complete
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
+            {uploading && uploadProgress && (
+              <EnhancedUploadProgressComponent progress={uploadProgress} />
             )}
 
-            {/* Compression Info */}
-            {compressionInfo && (
+            {/* Upload Results */}
+            {uploadResults.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5 text-green-500" />
-                    Compression Results
+                    <Monitor className="w-5 h-5 text-green-500" />
+                    Multi-Resolution Results
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Original Size</p>
-                      <p className="text-lg font-semibold">
-                        {formatFileSize(compressionInfo.originalSize)}
-                      </p>
+                  {uploadResults.map((result, index) => (
+                    <div key={index} className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                        <div>
+                          <p className="text-sm text-muted-foreground">Resolutions Created</p>
+                          <p className="text-lg font-semibold text-blue-500">
+                            {result.resolutions ? Object.keys(result.resolutions).length : 0}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">Compression Ratio</p>
+                          <p className="text-lg font-semibold text-green-600">
+                            {result.compressionRatio ? `${result.compressionRatio.toFixed(1)}%` : 'N/A'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">Streaming Format</p>
+                          <p className="text-lg font-semibold text-purple-500">
+                            HLS Adaptive
+                          </p>
+                        </div>
+                      </div>
+                      
+                      {result.resolutions && (
+                        <div className="mt-4 p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                          <p className="text-sm text-green-700 dark:text-green-300 mb-2">
+                            ✓ Video transcoded to multiple resolutions for instant playback:
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {Object.keys(result.resolutions).map(resolution => (
+                              <span key={resolution} className="px-2 py-1 bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-200 rounded text-xs font-medium">
+                                {resolution}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Compressed Size</p>
-                      <p className="text-lg font-semibold text-green-600">
-                        {formatFileSize(compressionInfo.compressedSize)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Space Saved</p>
-                      <p className="text-lg font-semibold text-green-600">
-                        {formatCompressionRatio(compressionInfo.compressionRatio)}
-                      </p>
-                    </div>
-                  </div>
-                  {compressionInfo.hlsUrl && (
-                    <div className="mt-4 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                      <p className="text-sm text-green-700 dark:text-green-300">
-                        ✓ Video successfully converted to HLS with {compressionInfo.segmentCount} segments
-                      </p>
-                    </div>
+                  ))}
                   )}
                 </CardContent>
               </Card>
@@ -444,17 +373,19 @@ const Upload = () => {
                 onClick={handleUpload}
                 disabled={files.length === 0 || uploading || !title.trim()}
                 size="lg"
-                className="min-w-40"
+                className="min-w-48"
               >
                 {uploading ? (
                   <>
-                    <Clock className="w-4 h-4 mr-2 animate-spin" />
-                    Uploading...
+                    <Zap className="w-4 h-4 mr-2 animate-pulse" />
+                    {uploadProgress?.stage === 'transcoding' ? 'Transcoding...' : 
+                     uploadProgress?.stage === 'uploading' ? 'Uploading...' : 
+                     'Processing...'}
                   </>
                 ) : (
                   <>
                     <UploadIcon className="w-4 h-4 mr-2" />
-                    Upload Videos
+                    Upload & Transcode
                   </>
                 )}
               </Button>

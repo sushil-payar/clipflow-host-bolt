@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import Navigation from "@/components/Navigation";
-import AdaptiveVideoPlayer from "@/components/AdaptiveVideoPlayer";
+import MultiResolutionVideoPlayer from "@/components/MultiResolutionVideoPlayer";
 import { supabase } from "@/integrations/supabase/client";
 import { 
   Eye, 
@@ -13,7 +13,8 @@ import {
   FileVideo, 
   Download,
   Share2,
-  ArrowLeft
+  ArrowLeft,
+  Monitor
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -136,28 +137,31 @@ const Watch = () => {
         <div className="container mx-auto max-w-4xl">
           {/* Video Player */}
           <div className="mb-6">
-            <AdaptiveVideoPlayer 
+            <MultiResolutionVideoPlayer 
               src={video.file_url}
               poster={video.thumbnail_url}
               title={video.title}
             />
             
-            {/* Debug Info - Remove in production */}
+            {/* Streaming Info */}
             <div className="mt-4 p-4 bg-gray-900 rounded-lg border border-gray-700">
-              <h4 className="text-sm font-medium text-white mb-2">Streaming Info</h4>
+              <h4 className="text-sm font-medium text-white mb-2 flex items-center gap-2">
+                <Monitor className="w-4 h-4" />
+                Multi-Resolution Streaming
+              </h4>
               <div className="text-xs text-gray-400 space-y-1">
-                <div><strong>Stream Type:</strong> {isHLSStream(video.file_url) ? 'HLS Adaptive Streaming (80% Compressed)' : 'Direct Video'}</div>
-                <div><strong>Player:</strong> Adaptive Video Player with HLS.js</div>
-                <div><strong>Features:</strong> Instant seeking, adaptive bitrate, YouTube-like controls</div>
-                <div><strong>Compression:</strong> 80% file size reduction with multiple quality levels</div>
-                <div><strong>Quality Levels:</strong> Auto, 1080p, 720p, 480p</div>
+                <div><strong>Stream Type:</strong> {isHLSStream(video.file_url) ? 'HLS Multi-Resolution Adaptive Streaming' : 'Direct Video'}</div>
+                <div><strong>Player:</strong> Multi-Resolution Video Player with HLS.js</div>
+                <div><strong>Features:</strong> Instant seeking, adaptive bitrate, 5 quality levels, real-time switching</div>
+                <div><strong>Quality Levels:</strong> Auto, 1080p, 720p, 480p, 360p, 240p</div>
+                <div><strong>Optimization:</strong> 4-second segments for instant playback, zero-latency tuning</div>
                 <div><strong>Original URL:</strong> <a href={video.file_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline break-all">{video.file_url}</a></div>
                 <div><strong>Status:</strong> {video.status}</div>
                 <div><strong>File Size:</strong> {formatFileSize(video.file_size)}</div>
                 <div><strong>Created:</strong> {new Date(video.created_at).toLocaleString()}</div>
                 <div className="mt-2 p-2 bg-gray-800 rounded text-xs">
-                  <strong>Performance:</strong> {isHLSStream(video.file_url) 
-                    ? 'Optimized for instant playback with 6-second segments and adaptive quality switching based on network conditions.' 
+                  <strong>Multi-Resolution Performance:</strong> {isHLSStream(video.file_url) 
+                    ? 'Optimized for instant playback with 4-second segments, 5 quality levels, and adaptive bitrate switching. Automatically selects best quality based on device and network.' 
                     : 'Standard video with presigned URL generation for secure playback.'
                   }
                 </div>
@@ -178,8 +182,9 @@ const Watch = () => {
                           <Eye className="w-4 h-4" />
                           {(video.views || 0).toLocaleString()} views
                         </div>
-                        <div className="flex items-center gap-1">
-                          <Calendar className="w-4 h-4" />
+                          <p className="text-lg font-semibold text-purple-500 flex items-center gap-1">
+                            <Monitor className="w-4 h-4" />
+                            Multi-Resolution HLS
                           {new Date(video.created_at).toLocaleDateString()}
                         </div>
                       </div>
