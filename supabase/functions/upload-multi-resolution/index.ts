@@ -359,6 +359,7 @@ serve(async (req) => {
     })
   }
 }
+)
 
 function getBitrateForResolution(resolution: string): number {
   const bitrateMap: { [key: string]: number } = {
