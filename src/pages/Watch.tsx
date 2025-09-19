@@ -185,7 +185,10 @@ const Watch = () => {
                           <p className="text-lg font-semibold text-purple-500 flex items-center gap-1">
                             <Monitor className="w-4 h-4" />
                             Multi-Resolution HLS
+                          </p>
+                          <p className="text-sm text-muted-foreground">
                           {new Date(video.created_at).toLocaleDateString()}
+                          </p>
                         </div>
                       </div>
                     </div>

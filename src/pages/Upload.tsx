@@ -362,7 +362,6 @@ const Upload = () => {
                       )}
                     </div>
                   ))}
-                  )}
                 </CardContent>
               </Card>
             )}
