@@ -152,6 +152,7 @@ const Watch = () => {
               </h4>
               <div className="text-xs text-gray-400 space-y-1">
                 <div><strong>Stream Type:</strong> {isHLSStream(video.file_url) ? 'HLS Multi-Resolution Adaptive Streaming' : 'Direct Video'}</div>
+                <div><strong>Stream Type:</strong> {isHLSStream(video.file_url || '') ? 'HLS Multi-Resolution Adaptive Streaming' : 'Direct Video'}</div>
                 <div><strong>Player:</strong> Multi-Resolution Video Player with HLS.js</div>
                 <div><strong>Features:</strong> Instant seeking, adaptive bitrate, 5 quality levels, real-time switching</div>
                 <div><strong>Quality Levels:</strong> Auto, 1080p, 720p, 480p, 360p, 240p</div>
@@ -161,7 +162,7 @@ const Watch = () => {
                 <div><strong>File Size:</strong> {formatFileSize(video.file_size)}</div>
                 <div><strong>Created:</strong> {new Date(video.created_at).toLocaleString()}</div>
                 <div className="mt-2 p-2 bg-gray-800 rounded text-xs">
-                  <strong>Multi-Resolution Performance:</strong> {isHLSStream(video.file_url) 
+                  <strong>Multi-Resolution Performance:</strong> {isHLSStream(video.file_url || '') 
                     ? 'Optimized for instant playback with 4-second segments, 5 quality levels, and adaptive bitrate switching. Automatically selects best quality based on device and network.' 
                     : 'Standard video with presigned URL generation for secure playback.'
                   }
