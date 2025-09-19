@@ -72,6 +72,7 @@ const Watch = () => {
   };
 
   const isHLSStream = (url: string): boolean => {
+    if (!url || typeof url !== 'string') return false;
     return url.includes('.m3u8') || url.includes('hls') || url.includes('master.m3u8');
   };
 
