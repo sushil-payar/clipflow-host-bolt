@@ -151,7 +151,6 @@ const Watch = () => {
                 Multi-Resolution Streaming
               </h4>
               <div className="text-xs text-gray-400 space-y-1">
-                <div><strong>Stream Type:</strong> {isHLSStream(video.file_url) ? 'HLS Multi-Resolution Adaptive Streaming' : 'Direct Video'}</div>
                 <div><strong>Stream Type:</strong> {isHLSStream(video.file_url || '') ? 'HLS Multi-Resolution Adaptive Streaming' : 'Direct Video'}</div>
                 <div><strong>Player:</strong> Multi-Resolution Video Player with HLS.js</div>
                 <div><strong>Features:</strong> Instant seeking, adaptive bitrate, 5 quality levels, real-time switching</div>
@@ -184,14 +183,13 @@ const Watch = () => {
                           <Eye className="w-4 h-4" />
                           {(video.views || 0).toLocaleString()} views
                         </div>
-                          <p className="text-lg font-semibold text-purple-500 flex items-center gap-1">
-                            <Monitor className="w-4 h-4" />
-                            Multi-Resolution HLS
-                          </p>
-                          <p className="text-sm text-muted-foreground">
+                        <p className="text-lg font-semibold text-purple-500 flex items-center gap-1">
+                          <Monitor className="w-4 h-4" />
+                          Multi-Resolution HLS
+                        </p>
+                        <p className="text-sm text-muted-foreground">
                           {new Date(video.created_at).toLocaleDateString()}
-                          </p>
-                        </div>
+                        </p>
                       </div>
                     </div>
                     <div className="flex gap-2">
