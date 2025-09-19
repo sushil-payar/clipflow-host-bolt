@@ -85,7 +85,7 @@ export const uploadVideoWithMultiResolution = async (
     });
 
     // Upload with progress tracking
-    const uploadPromise = new Promise<any>((resolve, reject) => {
+    const uploadPromise = new Promise<any>(async (resolve, reject) => {
       const xhr = new XMLHttpRequest();
       
       xhr.upload.onprogress = (event) => {
